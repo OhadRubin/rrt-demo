@@ -268,6 +268,159 @@ class RRTPlanner {
   }
 }
 
+// Simple Algorithm Interface
+const createRRTAlgorithm = (useRRTStar = false) => ({
+  name: useRRTStar ? 'RRT*' : 'RRT',
+  type: 'pathfinding',
+  async execute(maze, startPoint, goalPoint, options, onProgress) {
+    const planner = new RRTPlanner(maze, startPoint, goalPoint, {
+      ...options,
+      useRRTStar
+    });
+    
+    const success = await planner.buildRRT(onProgress, options.delay);
+    
+    if (success) {
+      const rawPath = planner.extractPath();
+      const smoothedPath = planner.smoothPath(rawPath);
+      return {
+        success: true,
+        path: smoothedPath,
+        tree: planner.nodes,
+        metrics: {
+          nodesExplored: planner.nodes.length,
+          iterations: planner.iterations
+        }
+      };
+    }
+    
+    return {
+      success: false,
+      path: null,
+      tree: planner.nodes,
+      metrics: {
+        nodesExplored: planner.nodes.length,
+        iterations: planner.iterations
+      }
+    };
+  }
+});
+
+// A* Algorithm Implementation
+const createAStarAlgorithm = () => ({
+  name: 'A*',
+  type: 'pathfinding',
+  async execute(maze, startPoint, goalPoint, options, onProgress) {
+    const { width, height, delay = 20 } = options;
+    
+    // Convert floating point coordinates to grid coordinates
+    const start = { x: Math.floor(startPoint.x), y: Math.floor(startPoint.y) };
+    const goal = { x: Math.floor(goalPoint.x), y: Math.floor(goalPoint.y) };
+    
+    // Check if start and goal are valid
+    if (maze[start.y * width + start.x] === 1 || maze[goal.y * width + goal.x] === 1) {
+      return { success: false, path: null, tree: [], metrics: { nodesExplored: 0 } };
+    }
+    
+    const openSet = [start];
+    const closedSet = new Set();
+    const gScore = {};
+    const fScore = {};
+    const cameFrom = {};
+    const allNodes = []; // For visualization
+    
+    const getKey = (node) => `${node.x},${node.y}`;
+    const heuristic = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    
+    gScore[getKey(start)] = 0;
+    fScore[getKey(start)] = heuristic(start, goal);
+    
+    while (openSet.length > 0) {
+      // Find node with lowest fScore
+      let current = openSet[0];
+      let currentIndex = 0;
+      for (let i = 1; i < openSet.length; i++) {
+        if (fScore[getKey(openSet[i])] < fScore[getKey(current)]) {
+          current = openSet[i];
+          currentIndex = i;
+        }
+      }
+      
+      // Remove current from openSet
+      openSet.splice(currentIndex, 1);
+      closedSet.add(getKey(current));
+      allNodes.push({ x: current.x, y: current.y, parent: cameFrom[getKey(current)] });
+      
+      // Check if we reached the goal
+      if (current.x === goal.x && current.y === goal.y) {
+        // Reconstruct path
+        const path = [];
+        let pathNode = current;
+        while (pathNode) {
+          path.unshift({ x: pathNode.x + 0.5, y: pathNode.y + 0.5 }); // Center of grid cell
+          pathNode = cameFrom[getKey(pathNode)];
+        }
+        
+        return {
+          success: true,
+          path,
+          tree: allNodes,
+          metrics: { nodesExplored: allNodes.length }
+        };
+      }
+      
+      // Check neighbors
+      const neighbors = [
+        { x: current.x + 1, y: current.y },
+        { x: current.x - 1, y: current.y },
+        { x: current.x, y: current.y + 1 },
+        { x: current.x, y: current.y - 1 }
+      ];
+      
+      for (const neighbor of neighbors) {
+        if (neighbor.x < 0 || neighbor.x >= width || 
+            neighbor.y < 0 || neighbor.y >= height ||
+            maze[neighbor.y * width + neighbor.x] === 1 ||
+            closedSet.has(getKey(neighbor))) {
+          continue;
+        }
+        
+        const tentativeGScore = gScore[getKey(current)] + 1;
+        
+        if (!openSet.some(n => n.x === neighbor.x && n.y === neighbor.y)) {
+          openSet.push(neighbor);
+        } else if (tentativeGScore >= (gScore[getKey(neighbor)] || Infinity)) {
+          continue;
+        }
+        
+        cameFrom[getKey(neighbor)] = current;
+        gScore[getKey(neighbor)] = tentativeGScore;
+        fScore[getKey(neighbor)] = tentativeGScore + heuristic(neighbor, goal);
+      }
+      
+      // Progress callback for visualization
+      if (onProgress && allNodes.length % 10 === 0) {
+        onProgress(allNodes.map(n => ({ x: n.x, y: n.y, parent: n.parent })), false);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    return { success: false, path: null, tree: allNodes, metrics: { nodesExplored: allNodes.length } };
+  }
+});
+
+// Algorithm Registry
+const algorithms = {
+  rrt: createRRTAlgorithm(false),
+  rrt_star: createRRTAlgorithm(true),
+  a_star: createAStarAlgorithm(),
+  frontier: {
+    name: 'Frontier-Based',
+    type: 'exploration', 
+    execute: null // Not implemented yet
+  }
+};
+
 // Main Component
 const MazeRRTPathfinder = () => {
   const canvasRef = useRef(null);
@@ -280,13 +433,14 @@ const MazeRRTPathfinder = () => {
   
   // RRT state
   const [rrtMode, setRrtMode] = useState(false);
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState('rrt');
   const [startPoint, setStartPoint] = useState(null);
   const [goalPoint, setGoalPoint] = useState(null);
   const [rrtTree, setRrtTree] = useState([]);
   const [rrtPath, setRrtPath] = useState(null);
   const [isPlanning, setIsPlanning] = useState(false);
   const [planningStatus, setPlanningStatus] = useState('');
-  const [useRRTStar, setUseRRTStar] = useState(true);
+  const [algorithmResults, setAlgorithmResults] = useState({});
   const [showTree, setShowTree] = useState(true);
   const [animationSpeed, setAnimationSpeed] = useState(10);
   
@@ -503,17 +657,26 @@ const MazeRRTPathfinder = () => {
     
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw RRT tree
+    // Draw algorithm visualization
     if (showTree && rrtTree.length > 0) {
-      ctx.strokeStyle = 'rgba(0, 100, 255, 0.3)';
-      ctx.lineWidth = 1;
-      
-      for (const node of rrtTree) {
-        if (node.parent) {
-          ctx.beginPath();
-          ctx.moveTo(node.parent.x * cellSize, node.parent.y * cellSize);
-          ctx.lineTo(node.x * cellSize, node.y * cellSize);
-          ctx.stroke();
+      if (selectedAlgorithm === 'a_star') {
+        // Draw A* explored nodes as grid squares
+        ctx.fillStyle = 'rgba(0, 100, 255, 0.3)';
+        for (const node of rrtTree) {
+          ctx.fillRect(node.x * cellSize, node.y * cellSize, cellSize, cellSize);
+        }
+      } else {
+        // Draw RRT tree connections
+        ctx.strokeStyle = 'rgba(0, 100, 255, 0.3)';
+        ctx.lineWidth = 1;
+        
+        for (const node of rrtTree) {
+          if (node.parent) {
+            ctx.beginPath();
+            ctx.moveTo(node.parent.x * cellSize, node.parent.y * cellSize);
+            ctx.lineTo(node.x * cellSize, node.y * cellSize);
+            ctx.stroke();
+          }
         }
       }
     }
@@ -552,7 +715,7 @@ const MazeRRTPathfinder = () => {
       ctx.arc(goalPoint.x * cellSize, goalPoint.y * cellSize, rrtParams.goalRadius * cellSize, 0, 2 * Math.PI);
       ctx.stroke();
     }
-  }, [dimensions, cellSize, rrtTree, rrtPath, startPoint, goalPoint, showTree, rrtParams.goalRadius]);
+  }, [dimensions, cellSize, rrtTree, rrtPath, startPoint, goalPoint, showTree, rrtParams.goalRadius, selectedAlgorithm]);
 
   // Handle canvas click
   const handleCanvasClick = useCallback((event) => {
@@ -587,44 +750,140 @@ const MazeRRTPathfinder = () => {
     }
   }, [rrtMode, cellSize, dimensions, maze, startPoint, goalPoint]);
 
-  // Plan path using RRT
+  // Plan path using selected algorithm
   const planPath = useCallback(async () => {
     if (!startPoint || !goalPoint || !maze) return;
+    
+    const algorithm = algorithms[selectedAlgorithm];
+    if (!algorithm || !algorithm.execute) {
+      setPlanningStatus(`${algorithm?.name || selectedAlgorithm.toUpperCase()} algorithm not yet implemented`);
+      return;
+    }
     
     setIsPlanning(true);
     setPlanningStatus('Planning path...');
     setRrtTree([]);
     setRrtPath(null);
     
-    const planner = new RRTPlanner(maze, startPoint, goalPoint, {
-      width: dimensions.width,
-      height: dimensions.height,
-      useRRTStar: useRRTStar,
-      ...rrtParams
-    });
-    
     // Calculate delay based on animation speed (0-20 maps to 50-0ms)
     const delay = Math.max(0, 50 - animationSpeed * 2.5);
     
-    // Build RRT with progress updates
-    const success = await planner.buildRRT((nodes, goalReached) => {
-      setRrtTree([...nodes]);
-      if (goalReached) {
-        setPlanningStatus('Goal reached!');
+    try {
+      const startTime = performance.now();
+      
+      const result = await algorithm.execute(
+        maze, 
+        startPoint, 
+        goalPoint,
+        {
+          width: dimensions.width,
+          height: dimensions.height,
+          delay,
+          ...rrtParams
+        },
+        (nodes, goalReached) => {
+          setRrtTree([...nodes]);
+          if (goalReached) {
+            setPlanningStatus('Goal reached!');
+          }
+        }
+      );
+      
+      const executionTime = performance.now() - startTime;
+      
+      // Calculate path length if path exists
+      const pathLength = result.path ? 
+        result.path.reduce((total, point, i) => {
+          if (i === 0) return 0;
+          const prev = result.path[i - 1];
+          return total + Math.sqrt(Math.pow(point.x - prev.x, 2) + Math.pow(point.y - prev.y, 2));
+        }, 0) : 0;
+      
+      // Store results for comparison
+      const algorithmResult = {
+        algorithm: algorithm.name,
+        success: result.success,
+        executionTime: Math.round(executionTime),
+        pathLength: Math.round(pathLength * 10) / 10,
+        nodesExplored: result.metrics.nodesExplored,
+        timestamp: Date.now()
+      };
+      
+      setAlgorithmResults(prev => ({
+        ...prev,
+        [selectedAlgorithm]: algorithmResult
+      }));
+      
+      if (result.success) {
+        setRrtPath(result.path);
+        setPlanningStatus(`${algorithm.name}: Path found! Length: ${algorithmResult.pathLength}, Nodes: ${result.metrics.nodesExplored}, Time: ${algorithmResult.executionTime}ms`);
+      } else {
+        setPlanningStatus('Failed to find path');
       }
-    }, delay);
-    
-    if (success) {
-      const rawPath = planner.extractPath();
-      const smoothedPath = planner.smoothPath(rawPath);
-      setRrtPath(smoothedPath);
-      setPlanningStatus(`Path found! ${planner.nodes.length} nodes explored`);
-    } else {
-      setPlanningStatus('Failed to find path');
+    } catch (error) {
+      setPlanningStatus(`Error: ${error.message}`);
     }
     
     setIsPlanning(false);
-  }, [startPoint, goalPoint, maze, dimensions, useRRTStar, rrtParams, animationSpeed]);
+  }, [startPoint, goalPoint, maze, dimensions, selectedAlgorithm, rrtParams, animationSpeed]);
+
+  // Compare all algorithms
+  const compareAlgorithms = useCallback(async () => {
+    if (!startPoint || !goalPoint || !maze) return;
+    
+    const algorithmsToTest = ['rrt', 'rrt_star', 'a_star'];
+    const results = {};
+    
+    setIsPlanning(true);
+    setPlanningStatus('Comparing algorithms...');
+    
+    for (const algKey of algorithmsToTest) {
+      const algorithm = algorithms[algKey];
+      if (!algorithm.execute) continue;
+      
+      try {
+        const startTime = performance.now();
+        const result = await algorithm.execute(
+          maze, 
+          startPoint, 
+          goalPoint,
+          {
+            width: dimensions.width,
+            height: dimensions.height,
+            delay: 1, // Fast comparison
+            ...rrtParams
+          },
+          () => {} // No progress callback for comparison
+        );
+        const executionTime = performance.now() - startTime;
+        
+        const pathLength = result.path ? 
+          result.path.reduce((total, point, i) => {
+            if (i === 0) return 0;
+            const prev = result.path[i - 1];
+            return total + Math.sqrt(Math.pow(point.x - prev.x, 2) + Math.pow(point.y - prev.y, 2));
+          }, 0) : 0;
+        
+        results[algKey] = {
+          algorithm: algorithm.name,
+          success: result.success,
+          executionTime: Math.round(executionTime),
+          pathLength: Math.round(pathLength * 10) / 10,
+          nodesExplored: result.metrics.nodesExplored
+        };
+      } catch (error) {
+        results[algKey] = {
+          algorithm: algorithm.name,
+          success: false,
+          error: error.message
+        };
+      }
+    }
+    
+    setAlgorithmResults(results);
+    setPlanningStatus('Comparison complete! Check results below.');
+    setIsPlanning(false);
+  }, [startPoint, goalPoint, maze, dimensions, rrtParams]);
 
   // Clear RRT
   const clearRRT = useCallback(() => {
@@ -632,6 +891,7 @@ const MazeRRTPathfinder = () => {
     setGoalPoint(null);
     setRrtTree([]);
     setRrtPath(null);
+    setAlgorithmResults({});
     setPlanningStatus('Click to set start point');
   }, []);
 
@@ -661,7 +921,7 @@ const MazeRRTPathfinder = () => {
     <div className="p-6 bg-gray-100 min-h-screen">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold text-center mb-6 text-gray-800">
-          Maze Generator with RRT Pathfinding
+          Maze Generator with Multiple Pathfinding Algorithms
         </h1>
         
         {/* Controls */}
@@ -724,20 +984,30 @@ const MazeRRTPathfinder = () => {
                     : 'bg-gray-600 hover:bg-gray-700 text-white'
                 }`}
               >
-                {rrtMode ? 'RRT Mode: ON' : 'RRT Mode: OFF'}
+                {rrtMode ? 'Pathfinding Mode: ON' : 'Pathfinding Mode: OFF'}
               </button>
               
               {rrtMode && (
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium">Algorithm:</label>
+                  <select 
+                    value={selectedAlgorithm} 
+                    onChange={(e) => {
+                      setSelectedAlgorithm(e.target.value);
+                      clearRRT();
+                    }}
+                    className="px-3 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="rrt">RRT (Rapidly-exploring Random Tree)</option>
+                    <option value="rrt_star">RRT* (Optimal RRT)</option>
+                    <option value="a_star">A* (Grid-based Optimal)</option>
+                    <option value="frontier">Frontier-Based (Coming Soon)</option>
+                  </select>
+                </div>
+              )}
+              
+              {rrtMode && (selectedAlgorithm === 'rrt' || selectedAlgorithm === 'rrt_star') && (
                 <>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={useRRTStar}
-                      onChange={(e) => setUseRRTStar(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span className="text-sm font-medium">Use RRT*</span>
-                  </label>
                   
                   <label className="flex items-center gap-2">
                     <input
@@ -770,6 +1040,14 @@ const MazeRRTPathfinder = () => {
                   </button>
                   
                   <button
+                    onClick={compareAlgorithms}
+                    disabled={!startPoint || !goalPoint || isPlanning}
+                    className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors disabled:bg-orange-400"
+                  >
+                    {isPlanning ? 'Comparing...' : 'Compare All'}
+                  </button>
+                  
+                  <button
                     onClick={clearRRT}
                     className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
                   >
@@ -782,6 +1060,32 @@ const MazeRRTPathfinder = () => {
             {rrtMode && (
               <div className="mt-4 text-center">
                 <p className="text-sm font-medium text-gray-700">{planningStatus}</p>
+              </div>
+            )}
+            
+            {/* Algorithm Comparison Results */}
+            {rrtMode && Object.keys(algorithmResults).length > 0 && (
+              <div className="mt-4 bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-semibold text-sm mb-3 text-center">Algorithm Comparison</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {Object.entries(algorithmResults).map(([key, result]) => (
+                    <div key={key} className="bg-white p-3 rounded border">
+                      <h5 className="font-medium text-sm text-center mb-2">{result.algorithm}</h5>
+                      {result.success ? (
+                        <div className="text-xs space-y-1">
+                          <div>✅ Success</div>
+                          <div>Path Length: {result.pathLength}</div>
+                          <div>Time: {result.executionTime}ms</div>
+                          <div>Nodes: {result.nodesExplored}</div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-red-600">
+                          ❌ Failed {result.error && `(${result.error})`}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -877,13 +1181,16 @@ const MazeRRTPathfinder = () => {
             1. Generate a maze using the controls above
           </p>
           <p className="text-sm mb-2">
-            2. Enable RRT Mode and click on the maze to set start (green) and goal (red) points
+            2. Enable Pathfinding Mode and select an algorithm from the dropdown
           </p>
           <p className="text-sm mb-2">
-            3. Click "Plan Path" to find a path using RRT or RRT* algorithm
+            3. Click on the maze to set start (green) and goal (red) points
+          </p>
+          <p className="text-sm mb-2">
+            4. Click "Plan Path" to find a path using the selected algorithm
           </p>
           <p className="text-sm">
-            4. RRT* provides optimal paths but takes longer. Adjust parameters for different behaviors.
+            5. Compare algorithms: RRT (fast, random), RRT* (optimal, slower), A* (optimal, grid-based), Frontier-based (coming soon)
           </p>
         </div>
       </div>
