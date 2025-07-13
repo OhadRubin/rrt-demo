@@ -1,9 +1,9 @@
 import React from 'react';
 import './App.css';
-import MazeRRTPathfinder from './maze-rrt-pathfinder';
+import MazePathfinder from './components/MazePathfinder';
 
 function App() {
-  return <MazeRRTPathfinder />;
+  return <MazePathfinder />;
 }
 
 export default App;
