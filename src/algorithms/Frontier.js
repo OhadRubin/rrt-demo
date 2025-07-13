@@ -1,3 +1,7 @@
+// SENSOR MODE TOGGLE: Change 'true' to 'false' in getSensorPositions calls to switch modes
+// true = GENEROUS sensor (3x3 base + wide cone + diagonals) - for debugging
+// false = PRECISE expanding cone (your preferred triangular pattern)
+
 // Robot directions
 const DIRECTIONS = {
   NORTH: 0,
@@ -81,55 +85,87 @@ const hasLineOfSight = (fullMaze, x1, y1, x2, y2, width, height) => {
 };
 
 // Get sensor positions based on robot direction and cone angle
-const getSensorPositions = (robotX, robotY, robotDirection, sensorRange, width, height) => {
+const getSensorPositions = (robotX, robotY, robotDirection, sensorRange, width, height, useGenerousSensor = true) => {
   const robotGridX = Math.floor(robotX);
   const robotGridY = Math.floor(robotY);
   const [dirX, dirY] = DIRECTION_VECTORS[robotDirection];
   const sensorPositions = [];
   
-  // Add current position and immediate neighbors
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      const x = robotGridX + dx;
-      const y = robotGridY + dy;
-      if (x >= 0 && x < width && y >= 0 && y < height) {
-        sensorPositions.push([x, y]);
+  if (useGenerousSensor) {
+    // GENEROUS SENSOR - for debugging/quick exploration
+    // Add 3x3 area around robot
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const x = robotGridX + dx;
+        const y = robotGridY + dy;
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          sensorPositions.push([x, y]);
+        }
       }
     }
-  }
-  
-  // Add directional cone positions
-  for (let dist = 1; dist <= sensorRange; dist++) {
-    const frontX = robotGridX + dirX * dist;
-    const frontY = robotGridY + dirY * dist;
     
-    if (frontX >= 0 && frontX < width && frontY >= 0 && frontY < height) {
-      sensorPositions.push([frontX, frontY]);
+    // Add wide cone with diagonals
+    for (let dist = 1; dist <= sensorRange; dist++) {
+      const frontX = robotGridX + dirX * dist;
+      const frontY = robotGridY + dirY * dist;
       
-      // Add positions to the sides (creating cone effect)
-      for (let side = 1; side <= Math.min(dist, sensorRange); side++) {
+      // Wide cone sides
+      for (let side = -dist; side <= dist; side++) {
+        let x, y;
+        
         if (robotDirection === DIRECTIONS.NORTH || robotDirection === DIRECTIONS.SOUTH) {
-          // Check left and right when facing north/south
-          const leftY = frontY - side;
-          const rightY = frontY + side;
-          
-          if (leftY >= 0 && leftY < height) {
-            sensorPositions.push([frontX, leftY]);
-          }
-          if (rightY >= 0 && rightY < height) {
-            sensorPositions.push([frontX, rightY]);
-          }
+          x = frontX;
+          y = frontY + side;
         } else {
-          // Check up and down when facing east/west
-          const upX = frontX - side;
-          const downX = frontX + side;
-          
-          if (upX >= 0 && upX < width) {
-            sensorPositions.push([upX, frontY]);
-          }
-          if (downX >= 0 && downX < width) {
-            sensorPositions.push([downX, frontY]);
-          }
+          x = frontX + side;
+          y = frontY;
+        }
+        
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          sensorPositions.push([x, y]);
+        }
+      }
+      
+      // Add diagonal coverage
+      const diagonals = [
+        [frontX + 1, frontY + 1], [frontX + 1, frontY - 1],
+        [frontX - 1, frontY + 1], [frontX - 1, frontY - 1]
+      ];
+      
+      for (const [diagX, diagY] of diagonals) {
+        if (diagX >= 0 && diagX < width && diagY >= 0 && diagY < height) {
+          sensorPositions.push([diagX, diagY]);
+        }
+      }
+    }
+  } else {
+    // PRECISE EXPANDING CONE - your preferred pattern
+    // Add robot position
+    sensorPositions.push([robotGridX, robotGridY]);
+    
+    // Add expanding cone in forward direction
+    for (let dist = 1; dist <= sensorRange; dist++) {
+      const frontX = robotGridX + dirX * dist;
+      const frontY = robotGridY + dirY * dist;
+      
+      // Width at this distance: starts at 3, grows by 2 each step (3, 5, 7, 9...)
+      const halfWidth = dist;
+      
+      for (let side = -halfWidth; side <= halfWidth; side++) {
+        let x, y;
+        
+        if (robotDirection === DIRECTIONS.NORTH || robotDirection === DIRECTIONS.SOUTH) {
+          // Moving vertically, expand horizontally
+          x = frontX;
+          y = frontY + side;
+        } else {
+          // Moving horizontally, expand vertically  
+          x = frontX + side;
+          y = frontY;
+        }
+        
+        if (x >= 0 && x < width && y >= 0 && y < height) {
+          sensorPositions.push([x, y]);
         }
       }
     }
@@ -146,7 +182,7 @@ const createInitialKnownMap = (fullMaze, robotX, robotY, robotDirection, sensorR
   // Reveal area using directional sensor with line-of-sight
   const robotGridX = Math.floor(robotX);
   const robotGridY = Math.floor(robotY);
-  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height);
+  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height, true);
   
   for (const [x, y] of sensorPositions) {
     if (hasLineOfSight(fullMaze, robotGridX, robotGridY, x, y, width, height)) {
@@ -163,7 +199,7 @@ const updateKnownMap = (knownMap, fullMaze, robotX, robotY, robotDirection, sens
   const robotGridY = Math.floor(robotY);
   
   // Reveal new area using directional sensor with line-of-sight
-  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height);
+  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height, true);
   
   for (const [x, y] of sensorPositions) {
     if (hasLineOfSight(fullMaze, robotGridX, robotGridY, x, y, width, height)) {
@@ -276,8 +312,25 @@ export const createFrontierAlgorithm = () => ({
     let robotDirection = DIRECTIONS.NORTH; // Initial direction
     let knownMap = createInitialKnownMap(fullMaze, currentPos.x, currentPos.y, robotDirection, sensorRange, width, height);
     
-    const robotGridX = Math.floor(currentPos.x);
-    const robotGridY = Math.floor(currentPos.y);
+    // Initial 360° spin to survey surroundings
+    const allDirections = [DIRECTIONS.NORTH, DIRECTIONS.EAST, DIRECTIONS.SOUTH, DIRECTIONS.WEST];
+    for (const direction of allDirections) {
+      robotDirection = direction;
+      knownMap = updateKnownMap(knownMap, fullMaze, currentPos.x, currentPos.y, robotDirection, sensorRange, width, height);
+      
+      // Show spinning progress
+      if (onProgress) {
+        const spinFrontiers = detectFrontiers(knownMap, width, height);
+        onProgress([{ x: currentPos.x, y: currentPos.y }], false, { 
+          frontiers: spinFrontiers, 
+          knownMap, 
+          robotPos: currentPos, 
+          robotDirection,
+          isSpinning: true 
+        });
+        await new Promise(resolve => setTimeout(resolve, delay * 2)); // Slower for visibility
+      }
+    }
     
     let exploredNodes = [{ x: currentPos.x, y: currentPos.y }];
     let iterationCount = 0;
