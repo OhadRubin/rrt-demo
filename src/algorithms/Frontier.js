@@ -1,17 +1,32 @@
+// Robot directions
+const DIRECTIONS = {
+  NORTH: 0,
+  EAST: 1,
+  SOUTH: 2,
+  WEST: 3
+};
+
+const DIRECTION_VECTORS = {
+  [DIRECTIONS.NORTH]: [0, -1],
+  [DIRECTIONS.EAST]: [1, 0],
+  [DIRECTIONS.SOUTH]: [0, 1],
+  [DIRECTIONS.WEST]: [-1, 0]
+};
+
 // Frontier Detection Functions (based on WFD algorithm from paper)
 const detectFrontiers = (knownMap, width, height) => {
   if (!knownMap) return [];
   
   const frontierPoints = [];
   
-  // Find all frontier points (unknown cells adjacent to known open cells)
+  // Find all frontier points (known open cells adjacent to unknown cells)
   for (let y = 1; y < height - 1; y++) {
     for (let x = 1; x < width - 1; x++) {
       const idx = y * width + x;
       
-      // Check if this cell is unknown (value 2)
-      if (knownMap[idx] === 2) {
-        // Check if it has at least one known open neighbor
+      // Check if this cell is known open space (value 0)
+      if (knownMap[idx] === 0) {
+        // Check if it has at least one unknown neighbor
         const neighbors = [
           knownMap[(y-1) * width + x],     // top
           knownMap[(y+1) * width + x],     // bottom
@@ -19,7 +34,7 @@ const detectFrontiers = (knownMap, width, height) => {
           knownMap[y * width + (x+1)]      // right
         ];
         
-        if (neighbors.some(neighbor => neighbor === 0)) {
+        if (neighbors.some(neighbor => neighbor === 2)) {
           frontierPoints.push({ x: x + 0.5, y: y + 0.5 });
         }
       }
@@ -29,39 +44,130 @@ const detectFrontiers = (knownMap, width, height) => {
   return frontierPoints;
 };
 
-const createInitialKnownMap = (fullMaze, robotX, robotY, sensorRange, width, height) => {
+// Line-of-sight checking - returns true if point (x2,y2) is visible from (x1,y1)
+const hasLineOfSight = (fullMaze, x1, y1, x2, y2, width, height) => {
+  const dx = Math.abs(x2 - x1);
+  const dy = Math.abs(y2 - y1);
+  const x = x1;
+  const y = y1;
+  
+  const n = 1 + dx + dy;
+  const x_inc = (x2 > x1) ? 1 : -1;
+  const y_inc = (y2 > y1) ? 1 : -1;
+  let error = dx - dy;
+  
+  let currentX = x;
+  let currentY = y;
+  
+  for (let i = 0; i < n; i++) {
+    // Check if current position is a wall
+    if (currentX >= 0 && currentX < width && currentY >= 0 && currentY < height) {
+      if (fullMaze[currentY * width + currentX] === 1) {
+        // Hit a wall - check if this is the target position
+        return (currentX === x2 && currentY === y2);
+      }
+    }
+    
+    if (error > 0) {
+      currentX += x_inc;
+      error -= dy;
+    } else {
+      currentY += y_inc;
+      error += dx;
+    }
+  }
+  
+  return true;
+};
+
+// Get sensor positions based on robot direction and cone angle
+const getSensorPositions = (robotX, robotY, robotDirection, sensorRange, width, height) => {
+  const robotGridX = Math.floor(robotX);
+  const robotGridY = Math.floor(robotY);
+  const [dirX, dirY] = DIRECTION_VECTORS[robotDirection];
+  const sensorPositions = [];
+  
+  // Add current position and immediate neighbors
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const x = robotGridX + dx;
+      const y = robotGridY + dy;
+      if (x >= 0 && x < width && y >= 0 && y < height) {
+        sensorPositions.push([x, y]);
+      }
+    }
+  }
+  
+  // Add directional cone positions
+  for (let dist = 1; dist <= sensorRange; dist++) {
+    const frontX = robotGridX + dirX * dist;
+    const frontY = robotGridY + dirY * dist;
+    
+    if (frontX >= 0 && frontX < width && frontY >= 0 && frontY < height) {
+      sensorPositions.push([frontX, frontY]);
+      
+      // Add positions to the sides (creating cone effect)
+      for (let side = 1; side <= Math.min(dist, sensorRange); side++) {
+        if (robotDirection === DIRECTIONS.NORTH || robotDirection === DIRECTIONS.SOUTH) {
+          // Check left and right when facing north/south
+          const leftY = frontY - side;
+          const rightY = frontY + side;
+          
+          if (leftY >= 0 && leftY < height) {
+            sensorPositions.push([frontX, leftY]);
+          }
+          if (rightY >= 0 && rightY < height) {
+            sensorPositions.push([frontX, rightY]);
+          }
+        } else {
+          // Check up and down when facing east/west
+          const upX = frontX - side;
+          const downX = frontX + side;
+          
+          if (upX >= 0 && upX < width) {
+            sensorPositions.push([upX, frontY]);
+          }
+          if (downX >= 0 && downX < width) {
+            sensorPositions.push([downX, frontY]);
+          }
+        }
+      }
+    }
+  }
+  
+  return sensorPositions;
+};
+
+const createInitialKnownMap = (fullMaze, robotX, robotY, robotDirection, sensorRange, width, height) => {
   // Initialize known map: 0 = open, 1 = wall, 2 = unknown
   const knownMap = new Uint8Array(width * height);
   knownMap.fill(2); // Start with everything unknown
   
-  // Reveal area around robot position
+  // Reveal area using directional sensor with line-of-sight
   const robotGridX = Math.floor(robotX);
   const robotGridY = Math.floor(robotY);
+  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height);
   
-  for (let y = Math.max(0, robotGridY - sensorRange); y <= Math.min(height - 1, robotGridY + sensorRange); y++) {
-    for (let x = Math.max(0, robotGridX - sensorRange); x <= Math.min(width - 1, robotGridX + sensorRange); x++) {
-      const distance = Math.sqrt((x - robotGridX) ** 2 + (y - robotGridY) ** 2);
-      if (distance <= sensorRange) {
-        knownMap[y * width + x] = fullMaze[y * width + x];
-      }
+  for (const [x, y] of sensorPositions) {
+    if (hasLineOfSight(fullMaze, robotGridX, robotGridY, x, y, width, height)) {
+      knownMap[y * width + x] = fullMaze[y * width + x];
     }
   }
   
   return knownMap;
 };
 
-const updateKnownMap = (knownMap, fullMaze, robotX, robotY, sensorRange, width, height) => {
+const updateKnownMap = (knownMap, fullMaze, robotX, robotY, robotDirection, sensorRange, width, height) => {
   const newKnownMap = new Uint8Array(knownMap);
   const robotGridX = Math.floor(robotX);
   const robotGridY = Math.floor(robotY);
   
-  // Reveal new area around current robot position
-  for (let y = Math.max(0, robotGridY - sensorRange); y <= Math.min(height - 1, robotGridY + sensorRange); y++) {
-    for (let x = Math.max(0, robotGridX - sensorRange); x <= Math.min(width - 1, robotGridX + sensorRange); x++) {
-      const distance = Math.sqrt((x - robotGridX) ** 2 + (y - robotGridY) ** 2);
-      if (distance <= sensorRange) {
-        newKnownMap[y * width + x] = fullMaze[y * width + x];
-      }
+  // Reveal new area using directional sensor with line-of-sight
+  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height);
+  
+  for (const [x, y] of sensorPositions) {
+    if (hasLineOfSight(fullMaze, robotGridX, robotGridY, x, y, width, height)) {
+      newKnownMap[y * width + x] = fullMaze[y * width + x];
     }
   }
   
@@ -84,9 +190,9 @@ const calculateCoverage = (knownMap, fullMaze) => {
   return totalCells > 0 ? (knownCells / totalCells) * 100 : 0;
 };
 
+
 // BFS pathfinding using robot's known map (allows movement through unknown space)
 const findPathBFS = (knownMap, startX, startY, targetX, targetY, width, height, timeout = 1000) => {
-  console.log(`BFS_DEBUG: Pathfinding from (${startX.toFixed(2)}, ${startY.toFixed(2)}) to (${targetX.toFixed(2)}, ${targetY.toFixed(2)})`);
   const startGridX = Math.floor(startX);
   const startGridY = Math.floor(startY);
   const targetGridX = Math.floor(targetX);
@@ -96,8 +202,14 @@ const findPathBFS = (knownMap, startX, startY, targetX, targetY, width, height, 
   if (targetGridX < 0 || targetGridX >= width || targetGridY < 0 || targetGridY >= height) {
     return null;
   }
-  if (knownMap[targetGridY * width + targetGridX] === 1) {
+  const targetCellValue = knownMap[targetGridY * width + targetGridX];
+  if (targetCellValue === 1) {
     return null; // Target is a known wall
+  }
+  
+  const startCellValue = knownMap[startGridY * width + startGridX];
+  if (startCellValue !== 0) {
+    return null;
   }
   
   const queue = [{x: startGridX, y: startGridY, path: []}];
@@ -122,15 +234,17 @@ const findPathBFS = (knownMap, startX, startY, targetX, targetY, width, height, 
       const newY = y + dy;
       const key = `${newX},${newY}`;
       
-      if (newX >= 0 && newX < width && newY >= 0 && newY < height && 
-          !visited.has(key) && knownMap[newY * width + newX] === 0) {
+      if (newX >= 0 && newX < width && newY >= 0 && newY < height && !visited.has(key)) {
+        const cellValue = knownMap[newY * width + newX];
         
-        visited.add(key);
-        queue.push({
-          x: newX, 
-          y: newY, 
-          path: [...path, {x: x + 0.5, y: y + 0.5}]
-        });
+        if (cellValue === 0) {
+          visited.add(key);
+          queue.push({
+            x: newX, 
+            y: newY, 
+            path: [...path, {x: x + 0.5, y: y + 0.5}]
+          });
+        }
       }
     }
   }
@@ -157,27 +271,14 @@ export const createFrontierAlgorithm = () => ({
       pathfindingTimeout = 100000  // Max BFS search nodes
     } = options;
     
-    // Initialize robot knowledge with starting position
+    // Initialize robot knowledge with starting position and direction
     let currentPos = { x: robotPos.x, y: robotPos.y };
-    let knownMap = createInitialKnownMap(fullMaze, currentPos.x, currentPos.y, sensorRange, width, height);
+    let robotDirection = DIRECTIONS.NORTH; // Initial direction
+    let knownMap = createInitialKnownMap(fullMaze, currentPos.x, currentPos.y, robotDirection, sensorRange, width, height);
     
-    console.log(`INIT_DEBUG: Robot starting at (${currentPos.x.toFixed(2)}, ${currentPos.y.toFixed(2)}) with sensor range ${sensorRange}`);
-    
-    // Debug initial known area
-    let openCells = 0;
-    let wallCells = 0; 
-    let unknownCells = 0;
-    for (let i = 0; i < knownMap.length; i++) {
-      if (knownMap[i] === 0) openCells++;
-      else if (knownMap[i] === 1) wallCells++;
-      else unknownCells++;
-    }
-    console.log(`INIT_DEBUG: Initial known area - Open: ${openCells}, Walls: ${wallCells}, Unknown: ${unknownCells}`);
-    
-    // Check immediate area around robot
     const robotGridX = Math.floor(currentPos.x);
     const robotGridY = Math.floor(currentPos.y);
-    console.log(`INIT_DEBUG: Robot grid position (${robotGridX}, ${robotGridY}), cell value: ${knownMap[robotGridY * width + robotGridX]}`);
+    
     let exploredNodes = [{ x: currentPos.x, y: currentPos.y }];
     let iterationCount = 0;
     let currentTarget = null;
@@ -195,21 +296,15 @@ export const createFrontierAlgorithm = () => ({
         // Detect current frontiers
         const currentFrontiers = detectFrontiers(knownMap, width, height);
         
-        console.log(`FRONTIER_DEBUG: Found ${currentFrontiers.length} frontiers. Robot at (${currentPos.x.toFixed(2)}, ${currentPos.y.toFixed(2)})`);
-        if (currentFrontiers.length > 0) {
-          console.log(`FRONTIER_DEBUG: First few frontiers:`, currentFrontiers.slice(0, 3).map(f => `(${f.x.toFixed(2)}, ${f.y.toFixed(2)})`));
-        }
         
         // Check exploration completion conditions
         const currentCoverage = calculateCoverage(knownMap, fullMaze);
         
         if (currentFrontiers.length === 0) {
-          console.log(`EXPLORATION_COMPLETE: No more frontiers found. Coverage: ${currentCoverage.toFixed(1)}%`);
           break;
         }
         
         if (currentCoverage >= explorationThreshold) {
-          console.log(`EXPLORATION_COMPLETE: Coverage threshold reached (${currentCoverage.toFixed(1)}% >= ${explorationThreshold}%)`);
           break;
         }
         
@@ -221,7 +316,6 @@ export const createFrontierAlgorithm = () => ({
         });
         
         if (validFrontiers.length === 0) {
-          console.log(`EXPLORATION_COMPLETE: All remaining frontiers have failed multiple times. Coverage: ${currentCoverage.toFixed(1)}%`);
           break;
         }
         
@@ -249,11 +343,8 @@ export const createFrontierAlgorithm = () => ({
         pathIndex = 0;
         
         if (currentPath && currentPath.length > 0) {
-          console.log(`PATHFINDING_DEBUG: Found path to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) with ${currentPath.length} steps`);
           consecutiveFailures = 0; // Reset failure counter on successful pathfinding
         } else {
-          console.log(`PATHFINDING_DEBUG: No path found to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) - marking as failed`);
-          
           // Track failed attempts for this frontier
           const frontierKey = `${currentTarget.x.toFixed(1)},${currentTarget.y.toFixed(1)}`;
           const currentFailures = failedFrontiers.get(frontierKey) || 0;
@@ -263,7 +354,6 @@ export const createFrontierAlgorithm = () => ({
           
           // If too many consecutive failures, break to avoid infinite loop
           if (consecutiveFailures > validFrontiers.length * 2) {
-            console.log(`EXPLORATION_COMPLETE: Too many consecutive pathfinding failures (${consecutiveFailures}). Coverage: ${currentCoverage.toFixed(1)}%`);
             break;
           }
           
@@ -288,17 +378,24 @@ export const createFrontierAlgorithm = () => ({
           const dy = nextWaypoint.y - currentPos.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
           
+          // Update robot direction based on movement
+          const normalizedDx = dx / distance;
+          const normalizedDy = dy / distance;
+          
+          if (Math.abs(normalizedDx) > Math.abs(normalizedDy)) {
+            robotDirection = normalizedDx > 0 ? DIRECTIONS.EAST : DIRECTIONS.WEST;
+          } else {
+            robotDirection = normalizedDy > 0 ? DIRECTIONS.SOUTH : DIRECTIONS.NORTH;
+          }
+          
           currentPos.x += (dx / distance) * actualStepSize;
           currentPos.y += (dy / distance) * actualStepSize;
           
-          console.log(`MOVEMENT_DEBUG: Moving to waypoint ${pathIndex + 1}/${currentPath.length} at (${nextWaypoint.x.toFixed(2)}, ${nextWaypoint.y.toFixed(2)}) [step: ${actualStepSize.toFixed(2)}]`);
         } else {
           // Reached waypoint, move to next one
           pathIndex++;
-          console.log(`MOVEMENT_DEBUG: Reached waypoint ${pathIndex}/${currentPath.length}`);
           
           if (pathIndex >= currentPath.length) {
-            console.log(`MOVEMENT_DEBUG: Reached frontier target! Starting new exploration cycle`);
             currentTarget = null;
             currentPath = null;
             pathIndex = 0;
@@ -306,25 +403,20 @@ export const createFrontierAlgorithm = () => ({
         }
       }
       
-      // Update known map based on new robot position
-      knownMap = updateKnownMap(knownMap, fullMaze, currentPos.x, currentPos.y, sensorRange, width, height);
+      // Update known map based on new robot position and direction
+      knownMap = updateKnownMap(knownMap, fullMaze, currentPos.x, currentPos.y, robotDirection, sensorRange, width, height);
       exploredNodes.push({ x: currentPos.x, y: currentPos.y });
       
       // Update frontiers and call progress callback
       if (onProgress) {
         const updatedFrontiers = detectFrontiers(knownMap, width, height);
-        onProgress(exploredNodes, false, { frontiers: updatedFrontiers, knownMap, robotPos: currentPos });
+        onProgress(exploredNodes, false, { frontiers: updatedFrontiers, knownMap, robotPos: currentPos, robotDirection });
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
     
     const finalCoverage = calculateCoverage(knownMap, fullMaze);
     const finalFrontiers = detectFrontiers(knownMap, width, height);
-    
-    console.log(`EXPLORATION_FINISHED: Total iterations: ${iterationCount}/${maxIterations}`);
-    console.log(`EXPLORATION_FINISHED: Final coverage: ${finalCoverage.toFixed(1)}%`);
-    console.log(`EXPLORATION_FINISHED: Remaining frontiers: ${finalFrontiers.length}`);
-    console.log(`EXPLORATION_FINISHED: Nodes explored: ${exploredNodes.length}`);
     
     return {
       success: true,
