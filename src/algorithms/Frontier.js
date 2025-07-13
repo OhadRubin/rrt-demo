@@ -2,6 +2,7 @@
 // true = GENEROUS sensor (3x3 base + wide cone + diagonals) - for debugging
 // false = PRECISE expanding cone (your preferred triangular pattern)
 
+const GENEROUS_SENSOR = true;
 // Robot directions
 const DIRECTIONS = {
   NORTH: 0,
@@ -182,7 +183,7 @@ const createInitialKnownMap = (fullMaze, robotX, robotY, robotDirection, sensorR
   // Reveal area using directional sensor with line-of-sight
   const robotGridX = Math.floor(robotX);
   const robotGridY = Math.floor(robotY);
-  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height, true);
+  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
   
   for (const [x, y] of sensorPositions) {
     if (hasLineOfSight(fullMaze, robotGridX, robotGridY, x, y, width, height)) {
