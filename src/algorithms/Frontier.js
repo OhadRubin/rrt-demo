@@ -84,8 +84,8 @@ const calculateCoverage = (knownMap, fullMaze) => {
   return totalCells > 0 ? (knownCells / totalCells) * 100 : 0;
 };
 
-// BFS pathfinding to navigate around obstacles
-const findPathBFS = (fullMaze, startX, startY, targetX, targetY, width, height, timeout = 1000) => {
+// BFS pathfinding using robot's known map (allows movement through unknown space)
+const findPathBFS = (knownMap, startX, startY, targetX, targetY, width, height, timeout = 1000) => {
   const startGridX = Math.floor(startX);
   const startGridY = Math.floor(startY);
   const targetGridX = Math.floor(targetX);
@@ -95,8 +95,8 @@ const findPathBFS = (fullMaze, startX, startY, targetX, targetY, width, height, 
   if (targetGridX < 0 || targetGridX >= width || targetGridY < 0 || targetGridY >= height) {
     return null;
   }
-  if (fullMaze[targetGridY * width + targetGridX] === 1) {
-    return null; // Target is a wall
+  if (knownMap[targetGridY * width + targetGridX] === 1) {
+    return null; // Target is a known wall
   }
   
   const queue = [{x: startGridX, y: startGridY, path: []}];
@@ -122,7 +122,7 @@ const findPathBFS = (fullMaze, startX, startY, targetX, targetY, width, height, 
       const key = `${newX},${newY}`;
       
       if (newX >= 0 && newX < width && newY >= 0 && newY < height && 
-          !visited.has(key) && fullMaze[newY * width + newX] === 0) {
+          !visited.has(key) && knownMap[newY * width + newX] !== 1) {
         
         visited.add(key);
         queue.push({
@@ -152,7 +152,7 @@ export const createFrontierAlgorithm = () => ({
       maxIterations = 500,    // Max exploration iterations
       waypointTolerance = 0.1, // Distance to waypoint before moving to next
       minFrontierSize = 1,    // Minimum frontier points to consider
-      explorationThreshold = 95, // Stop when X% coverage achieved
+      explorationThreshold = 99, // Stop when X% coverage achieved
       pathfindingTimeout = 1000  // Max BFS search nodes
     } = options;
     
@@ -165,7 +165,7 @@ export const createFrontierAlgorithm = () => ({
     let currentPath = null;
     let pathIndex = 0;
     
-    while (iterationCount < maxIterations) {
+    while (true) {
       iterationCount++;
       
       // Detect current frontiers
@@ -184,17 +184,11 @@ export const createFrontierAlgorithm = () => ({
         break;
       }
       
-      // Filter frontiers by minimum size
-      const validFrontiers = currentFrontiers.filter(frontier => {
-        return currentFrontiers.filter(f => 
-          Math.abs(f.x - frontier.x) < 1 && Math.abs(f.y - frontier.y) < 1
-        ).length >= minFrontierSize;
-      });
+      // Use all frontiers - remove problematic size filtering
+      const validFrontiers = currentFrontiers;
       
-      if (validFrontiers.length === 0) {
-        console.log(`EXPLORATION_COMPLETE: No valid frontiers remaining (min size: ${minFrontierSize}). Coverage: ${currentCoverage.toFixed(1)}%`);
-        break;
-      }
+      // Remove early termination based on frontier filtering
+      // Let the algorithm continue as long as frontiers exist
       
       // Find nearest accessible frontier (skip inaccessible ones)
       let nearestFrontier = null;
@@ -220,23 +214,17 @@ export const createFrontierAlgorithm = () => ({
       if (!currentTarget || !currentPath || (currentTarget.x !== nearestFrontier.x || currentTarget.y !== nearestFrontier.y)) {
         currentTarget = nearestFrontier;
         
-        // Find path to the frontier using BFS
-        currentPath = findPathBFS(fullMaze, currentPos.x, currentPos.y, currentTarget.x, currentTarget.y, width, height, pathfindingTimeout);
+        // Find path to the frontier using BFS with known map
+        currentPath = findPathBFS(knownMap, currentPos.x, currentPos.y, currentTarget.x, currentTarget.y, width, height, pathfindingTimeout);
         pathIndex = 0;
         
         if (currentPath && currentPath.length > 0) {
           console.log(`PATHFINDING_DEBUG: Found path to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) with ${currentPath.length} steps`);
         } else {
-          console.log(`PATHFINDING_DEBUG: No path found to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) - marking as inaccessible`);
+          console.log(`PATHFINDING_DEBUG: No path found to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) - trying next frontier`);
           
-          // Mark frontier as inaccessible
-          for (const frontier of validFrontiers) {
-            if (Math.abs(frontier.x - currentTarget.x) < 0.1 && Math.abs(frontier.y - currentTarget.y) < 0.1) {
-              frontier.inaccessible = true;
-              break;
-            }
-          }
-          
+          // Instead of marking as inaccessible permanently, just skip this iteration
+          // and try again next time - the map state might change
           currentTarget = null;
           currentPath = null;
           continue; // Try next frontier
