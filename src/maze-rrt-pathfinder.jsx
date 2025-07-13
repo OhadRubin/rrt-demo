@@ -268,6 +268,93 @@ class RRTPlanner {
   }
 }
 
+// Frontier Detection Functions (based on WFD algorithm from paper)
+const detectFrontiers = (knownMap, width, height) => {
+  if (!knownMap) return [];
+  
+  const frontierPoints = [];
+  const visited = new Set();
+  
+  // Find all frontier points (unknown cells adjacent to known open cells)
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      
+      // Check if this cell is unknown (value 2)
+      if (knownMap[idx] === 2) {
+        // Check if it has at least one known open neighbor
+        const neighbors = [
+          knownMap[(y-1) * width + x],     // top
+          knownMap[(y+1) * width + x],     // bottom
+          knownMap[y * width + (x-1)],     // left
+          knownMap[y * width + (x+1)]      // right
+        ];
+        
+        if (neighbors.some(neighbor => neighbor === 0)) {
+          frontierPoints.push({ x: x + 0.5, y: y + 0.5 });
+        }
+      }
+    }
+  }
+  
+  return frontierPoints;
+};
+
+const createInitialKnownMap = (fullMaze, robotX, robotY, sensorRange, width, height) => {
+  // Initialize known map: 0 = open, 1 = wall, 2 = unknown
+  const knownMap = new Uint8Array(width * height);
+  knownMap.fill(2); // Start with everything unknown
+  
+  // Reveal area around robot position
+  const robotGridX = Math.floor(robotX);
+  const robotGridY = Math.floor(robotY);
+  
+  for (let y = Math.max(0, robotGridY - sensorRange); y <= Math.min(height - 1, robotGridY + sensorRange); y++) {
+    for (let x = Math.max(0, robotGridX - sensorRange); x <= Math.min(width - 1, robotGridX + sensorRange); x++) {
+      const distance = Math.sqrt((x - robotGridX) ** 2 + (y - robotGridY) ** 2);
+      if (distance <= sensorRange) {
+        knownMap[y * width + x] = fullMaze[y * width + x];
+      }
+    }
+  }
+  
+  return knownMap;
+};
+
+const updateKnownMap = (knownMap, fullMaze, robotX, robotY, sensorRange, width, height) => {
+  const newKnownMap = new Uint8Array(knownMap);
+  const robotGridX = Math.floor(robotX);
+  const robotGridY = Math.floor(robotY);
+  
+  // Reveal new area around current robot position
+  for (let y = Math.max(0, robotGridY - sensorRange); y <= Math.min(height - 1, robotGridY + sensorRange); y++) {
+    for (let x = Math.max(0, robotGridX - sensorRange); x <= Math.min(width - 1, robotGridX + sensorRange); x++) {
+      const distance = Math.sqrt((x - robotGridX) ** 2 + (y - robotGridY) ** 2);
+      if (distance <= sensorRange) {
+        newKnownMap[y * width + x] = fullMaze[y * width + x];
+      }
+    }
+  }
+  
+  return newKnownMap;
+};
+
+const calculateCoverage = (knownMap, fullMaze) => {
+  let knownCells = 0;
+  let totalCells = 0;
+  
+  for (let i = 0; i < fullMaze.length; i++) {
+    if (fullMaze[i] === 0) { // Only count open cells
+      totalCells++;
+      if (knownMap[i] === 0) {
+        knownCells++;
+      }
+    }
+  }
+  
+  return totalCells > 0 ? (knownCells / totalCells) * 100 : 0;
+};
+
 // Simple Algorithm Interface
 const createRRTAlgorithm = (useRRTStar = false) => ({
   name: useRRTStar ? 'RRT*' : 'RRT',
@@ -416,8 +503,81 @@ const algorithms = {
   a_star: createAStarAlgorithm(),
   frontier: {
     name: 'Frontier-Based',
-    type: 'exploration', 
-    execute: null // Not implemented yet
+    type: 'exploration',
+    async execute(fullMaze, robotPos, goalPoint, options, onProgress) {
+      const { width, height, delay = 50 } = options;
+      const sensorRange = 3; // Robot can see 3 cells in each direction
+      
+      // Initialize robot knowledge with starting position
+      let currentPos = { x: robotPos.x, y: robotPos.y };
+      let knownMap = createInitialKnownMap(fullMaze, currentPos.x, currentPos.y, sensorRange, width, height);
+      let exploredNodes = [{ x: currentPos.x, y: currentPos.y }];
+      let iterationCount = 0;
+      const maxIterations = 200;
+      
+      while (iterationCount < maxIterations) {
+        iterationCount++;
+        
+        // Detect current frontiers
+        const currentFrontiers = detectFrontiers(knownMap, width, height);
+        
+        if (currentFrontiers.length === 0) {
+          // No more frontiers - exploration complete
+          break;
+        }
+        
+        // Find nearest accessible frontier
+        let nearestFrontier = null;
+        let minDistance = Infinity;
+        
+        for (const frontier of currentFrontiers) {
+          const distance = Math.sqrt(
+            Math.pow(frontier.x - currentPos.x, 2) + 
+            Math.pow(frontier.y - currentPos.y, 2)
+          );
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearestFrontier = frontier;
+          }
+        }
+        
+        if (!nearestFrontier) break;
+        
+        // Move robot toward frontier (simplified movement)
+        const dx = nearestFrontier.x - currentPos.x;
+        const dy = nearestFrontier.y - currentPos.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > 0) {
+          const stepSize = Math.min(2, distance);
+          currentPos.x += (dx / distance) * stepSize;
+          currentPos.y += (dy / distance) * stepSize;
+        }
+        
+        // Update known map based on new robot position
+        knownMap = updateKnownMap(knownMap, fullMaze, currentPos.x, currentPos.y, sensorRange, width, height);
+        exploredNodes.push({ x: currentPos.x, y: currentPos.y });
+        
+        // Update frontiers and call progress callback
+        if (onProgress) {
+          const updatedFrontiers = detectFrontiers(knownMap, width, height);
+          onProgress(exploredNodes, false, { frontiers: updatedFrontiers, knownMap, robotPos: currentPos });
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+      
+      return {
+        success: true,
+        path: exploredNodes,
+        tree: exploredNodes,
+        metrics: {
+          nodesExplored: exploredNodes.length,
+          iterations: iterationCount,
+          mapCoverage: calculateCoverage(knownMap, fullMaze)
+        },
+        finalKnownMap: knownMap
+      };
+    }
   }
 };
 
@@ -443,6 +603,12 @@ const MazeRRTPathfinder = () => {
   const [algorithmResults, setAlgorithmResults] = useState({});
   const [showTree, setShowTree] = useState(true);
   const [animationSpeed, setAnimationSpeed] = useState(10);
+  
+  // Exploration state
+  const [explorationMode, setExplorationMode] = useState(false);
+  const [knownMap, setKnownMap] = useState(null);
+  const [robotPosition, setRobotPosition] = useState(null);
+  const [frontiers, setFrontiers] = useState([]);
   
   // RRT parameters
   const [rrtParams, setRrtParams] = useState({
@@ -624,10 +790,23 @@ const MazeRRTPathfinder = () => {
     const imageData = ctx.createImageData(canvas.width, canvas.height);
     const data = imageData.data;
     
+    // Use knownMap in exploration mode, full maze in pathfinding mode
+    const displayMap = explorationMode && knownMap ? knownMap : maze;
+    
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const isWall = maze[y * width + x] === 1;
-        const color = isWall ? 0 : 255;
+        const cellValue = displayMap[y * width + x];
+        let color;
+        
+        if (explorationMode && knownMap) {
+          // In exploration mode: 0 = open (white), 1 = wall (black), 2 = unknown (gray)
+          if (cellValue === 0) color = 255;      // Open space - white
+          else if (cellValue === 1) color = 0;   // Wall - black  
+          else color = 128;                      // Unknown - gray
+        } else {
+          // In pathfinding mode: 0 = open (white), 1 = wall (black)
+          color = cellValue === 1 ? 0 : 255;
+        }
         
         for (let dy = 0; dy < cellSize; dy++) {
           for (let dx = 0; dx < cellSize; dx++) {
@@ -642,7 +821,7 @@ const MazeRRTPathfinder = () => {
     }
     
     ctx.putImageData(imageData, 0, 0);
-  }, [maze, dimensions, cellSize]);
+  }, [maze, dimensions, cellSize, explorationMode, knownMap]);
 
   // Render RRT overlay
   const renderRRTOverlay = useCallback(() => {
@@ -681,6 +860,31 @@ const MazeRRTPathfinder = () => {
       }
     }
     
+    // Draw frontiers (exploration mode)
+    if (explorationMode && frontiers.length > 0) {
+      ctx.fillStyle = 'rgba(255, 165, 0, 0.8)'; // Orange color for frontiers
+      for (const frontier of frontiers) {
+        ctx.beginPath();
+        ctx.arc(frontier.x * cellSize, frontier.y * cellSize, 3, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+    
+    // Draw robot position (exploration mode)
+    if (explorationMode && robotPosition) {
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.8)'; // Green color for robot
+      ctx.beginPath();
+      ctx.arc(robotPosition.x * cellSize, robotPosition.y * cellSize, 6, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Draw sensor range circle
+      ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(robotPosition.x * cellSize, robotPosition.y * cellSize, 3 * cellSize, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+    
     // Draw path
     if (rrtPath) {
       ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
@@ -715,7 +919,7 @@ const MazeRRTPathfinder = () => {
       ctx.arc(goalPoint.x * cellSize, goalPoint.y * cellSize, rrtParams.goalRadius * cellSize, 0, 2 * Math.PI);
       ctx.stroke();
     }
-  }, [dimensions, cellSize, rrtTree, rrtPath, startPoint, goalPoint, showTree, rrtParams.goalRadius, selectedAlgorithm]);
+  }, [dimensions, cellSize, rrtTree, rrtPath, startPoint, goalPoint, showTree, rrtParams.goalRadius, selectedAlgorithm, explorationMode, frontiers, robotPosition]);
 
   // Handle canvas click
   const handleCanvasClick = useCallback((event) => {
@@ -735,8 +939,12 @@ const MazeRRTPathfinder = () => {
       
       if (!startPoint) {
         setStartPoint({ x, y });
-        setPlanningStatus('Click to set goal point');
-      } else if (!goalPoint) {
+        if (explorationMode) {
+          setPlanningStatus('Ready to start exploration');
+        } else {
+          setPlanningStatus('Click to set goal point');
+        }
+      } else if (!explorationMode && !goalPoint) {
         setGoalPoint({ x, y });
         setPlanningStatus('Ready to plan path');
       } else {
@@ -745,14 +953,22 @@ const MazeRRTPathfinder = () => {
         setGoalPoint(null);
         setRrtTree([]);
         setRrtPath(null);
-        setPlanningStatus('Click to set goal point');
+        setKnownMap(null);
+        setRobotPosition(null);
+        setFrontiers([]);
+        if (explorationMode) {
+          setPlanningStatus('Ready to start exploration');
+        } else {
+          setPlanningStatus('Click to set goal point');
+        }
       }
     }
-  }, [rrtMode, cellSize, dimensions, maze, startPoint, goalPoint]);
+  }, [rrtMode, cellSize, dimensions, maze, startPoint, goalPoint, explorationMode]);
 
   // Plan path using selected algorithm
   const planPath = useCallback(async () => {
-    if (!startPoint || !goalPoint || !maze) return;
+    if (!startPoint || !maze) return;
+    if (!explorationMode && !goalPoint) return; // Goal needed for pathfinding, but not exploration
     
     const algorithm = algorithms[selectedAlgorithm];
     if (!algorithm || !algorithm.execute) {
@@ -761,9 +977,20 @@ const MazeRRTPathfinder = () => {
     }
     
     setIsPlanning(true);
-    setPlanningStatus('Planning path...');
     setRrtTree([]);
     setRrtPath(null);
+    
+    if (explorationMode) {
+      setPlanningStatus('Exploring unknown environment...');
+      // Initialize robot position and known map for exploration
+      setRobotPosition({ x: startPoint.x, y: startPoint.y });
+      const initialKnownMap = createInitialKnownMap(maze, startPoint.x, startPoint.y, 3, dimensions.width, dimensions.height);
+      setKnownMap(initialKnownMap);
+      const initialFrontiers = detectFrontiers(initialKnownMap, dimensions.width, dimensions.height);
+      setFrontiers(initialFrontiers);
+    } else {
+      setPlanningStatus('Planning path...');
+    }
     
     // Calculate delay based on animation speed (0-20 maps to 50-0ms)
     const delay = Math.max(0, 50 - animationSpeed * 2.5);
@@ -781,8 +1008,16 @@ const MazeRRTPathfinder = () => {
           delay,
           ...rrtParams
         },
-        (nodes, goalReached) => {
+        (nodes, goalReached, extraData) => {
           setRrtTree([...nodes]);
+          
+          if (explorationMode && extraData) {
+            // Update exploration state
+            if (extraData.frontiers) setFrontiers(extraData.frontiers);
+            if (extraData.knownMap) setKnownMap(extraData.knownMap);
+            if (extraData.robotPos) setRobotPosition(extraData.robotPos);
+          }
+          
           if (goalReached) {
             setPlanningStatus('Goal reached!');
           }
@@ -892,8 +1127,11 @@ const MazeRRTPathfinder = () => {
     setRrtTree([]);
     setRrtPath(null);
     setAlgorithmResults({});
-    setPlanningStatus('Click to set start point');
-  }, []);
+    setKnownMap(null);
+    setRobotPosition(null);
+    setFrontiers([]);
+    setPlanningStatus(explorationMode ? 'Click to set robot start position' : 'Click to set start point');
+  }, [explorationMode]);
 
   // Effects
   useEffect(() => {
@@ -913,9 +1151,15 @@ const MazeRRTPathfinder = () => {
 
   useEffect(() => {
     if (rrtMode && !startPoint) {
-      setPlanningStatus('Click to set start point');
+      setPlanningStatus(explorationMode ? 'Click to set robot start position' : 'Click to set start point');
+    } else if (rrtMode && startPoint && !explorationMode && !goalPoint) {
+      setPlanningStatus('Click to set goal point');
+    } else if (rrtMode && startPoint && explorationMode) {
+      setPlanningStatus('Ready to start exploration');
+    } else if (rrtMode && startPoint && goalPoint && !explorationMode) {
+      setPlanningStatus('Ready to plan path');
     }
-  }, [rrtMode, startPoint]);
+  }, [rrtMode, startPoint, goalPoint, explorationMode]);
 
   return (
     <div className="p-6 bg-gray-100 min-h-screen">
@@ -976,7 +1220,18 @@ const MazeRRTPathfinder = () => {
               <button
                 onClick={() => {
                   setRrtMode(!rrtMode);
-                  if (!rrtMode) clearRRT();
+                  if (!rrtMode) {
+                    clearRRT();
+                    // Initialize exploration mode if frontier algorithm is selected
+                    if (selectedAlgorithm === 'frontier') {
+                      setExplorationMode(true);
+                    }
+                  } else {
+                    setExplorationMode(false);
+                    setKnownMap(null);
+                    setRobotPosition(null);
+                    setFrontiers([]);
+                  }
                 }}
                 className={`px-4 py-2 rounded transition-colors ${
                   rrtMode 
@@ -984,7 +1239,7 @@ const MazeRRTPathfinder = () => {
                     : 'bg-gray-600 hover:bg-gray-700 text-white'
                 }`}
               >
-                {rrtMode ? 'Pathfinding Mode: ON' : 'Pathfinding Mode: OFF'}
+                {rrtMode ? (explorationMode ? 'Exploration Mode: ON' : 'Pathfinding Mode: ON') : 'Algorithm Mode: OFF'}
               </button>
               
               {rrtMode && (
@@ -994,6 +1249,8 @@ const MazeRRTPathfinder = () => {
                     value={selectedAlgorithm} 
                     onChange={(e) => {
                       setSelectedAlgorithm(e.target.value);
+                      const isExploration = algorithms[e.target.value]?.type === 'exploration';
+                      setExplorationMode(isExploration);
                       clearRRT();
                     }}
                     className="px-3 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1001,7 +1258,7 @@ const MazeRRTPathfinder = () => {
                     <option value="rrt">RRT (Rapidly-exploring Random Tree)</option>
                     <option value="rrt_star">RRT* (Optimal RRT)</option>
                     <option value="a_star">A* (Grid-based Optimal)</option>
-                    <option value="frontier">Frontier-Based (Coming Soon)</option>
+                    <option value="frontier">Frontier-Based Exploration</option>
                   </select>
                 </div>
               )}
@@ -1033,10 +1290,10 @@ const MazeRRTPathfinder = () => {
                   
                   <button
                     onClick={planPath}
-                    disabled={!startPoint || !goalPoint || isPlanning}
+                    disabled={!startPoint || (!explorationMode && !goalPoint) || isPlanning}
                     className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors disabled:bg-purple-400"
                   >
-                    {isPlanning ? 'Planning...' : 'Plan Path'}
+                    {isPlanning ? (explorationMode ? 'Exploring...' : 'Planning...') : (explorationMode ? 'Start Exploration' : 'Plan Path')}
                   </button>
                   
                   <button
