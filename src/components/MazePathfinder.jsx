@@ -36,13 +36,15 @@ const MazePathfinder = () => {
     frontiers,
     rrtParams,
     setRrtParams,
+    frontierParams,
+    setFrontierParams,
     planPath,
     compareAlgorithms,
     clearPathfinding,
     setPoint
   } = usePathfinding(maze, dimensions);
 
-  const [rrtMode, setRrtMode] = React.useState(false);
+  const [rrtMode, setRrtMode] = React.useState(true);
   const [showTree, setShowTree] = React.useState(true);
 
   // Update planning status based on current state
@@ -118,6 +120,8 @@ const MazePathfinder = () => {
           planningStatus={planningStatus}
           rrtParams={rrtParams}
           setRrtParams={setRrtParams}
+          frontierParams={frontierParams}
+          setFrontierParams={setFrontierParams}
         />
         
         <MazeCanvas

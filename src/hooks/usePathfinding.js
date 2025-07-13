@@ -1,8 +1,64 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { algorithms } from '../algorithms/index.js';
 
+// Helper function to find valid random start and end points
+const findRandomPoints = (maze, width, height) => {
+  if (!maze) return { start: null, end: null };
+  
+  // Find all open cells (value 0)
+  const openCells = [];
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      if (maze[y * width + x] === 0) {
+        openCells.push({ x: x + 0.5, y: y + 0.5 });
+      }
+    }
+  }
+  
+  if (openCells.length < 2) return { start: null, end: null };
+  
+  // Calculate minimum distance (half of maximum possible distance)
+  const maxDistance = Math.sqrt(width * width + height * height);
+  const minDistance = maxDistance / 2;
+  
+  let attempts = 0;
+  const maxAttempts = 100;
+  
+  while (attempts < maxAttempts) {
+    const startIndex = Math.floor(Math.random() * openCells.length);
+    const endIndex = Math.floor(Math.random() * openCells.length);
+    
+    if (startIndex === endIndex) {
+      attempts++;
+      continue;
+    }
+    
+    const start = openCells[startIndex];
+    const end = openCells[endIndex];
+    
+    const distance = Math.sqrt(
+      Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2)
+    );
+    
+    if (distance >= minDistance) {
+      return { start, end };
+    }
+    
+    attempts++;
+  }
+  
+  // Fallback: just pick two random points if we can't find ones far enough apart
+  if (openCells.length >= 2) {
+    const start = openCells[0];
+    const end = openCells[openCells.length - 1];
+    return { start, end };
+  }
+  
+  return { start: null, end: null };
+};
+
 export const usePathfinding = (maze, dimensions) => {
-  const [selectedAlgorithm, setSelectedAlgorithm] = useState('rrt');
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState('frontier');
   const [startPoint, setStartPoint] = useState(null);
   const [goalPoint, setGoalPoint] = useState(null);
   const [rrtTree, setRrtTree] = useState([]);
@@ -13,7 +69,7 @@ export const usePathfinding = (maze, dimensions) => {
   const [animationSpeed, setAnimationSpeed] = useState(10);
   
   // Exploration state
-  const [explorationMode, setExplorationMode] = useState(false);
+  const [explorationMode, setExplorationMode] = useState(true);
   const [knownMap, setKnownMap] = useState(null);
   const [robotPosition, setRobotPosition] = useState(null);
   const [frontiers, setFrontiers] = useState([]);
@@ -26,6 +82,33 @@ export const usePathfinding = (maze, dimensions) => {
     goalBias: 0.1,
     rewireRadius: 5
   });
+
+  // Frontier parameters
+  const [frontierParams, setFrontierParams] = useState({
+    sensorRange: 3,
+    stepSize: 1,
+    maxIterations: 500,
+    waypointTolerance: 0.1,
+    minFrontierSize: 1,
+    explorationThreshold: 95,
+    pathfindingTimeout: 1000
+  });
+
+  // Automatically set random start and end points when maze changes
+  useEffect(() => {
+    if (maze && dimensions.width && dimensions.height) {
+      const points = findRandomPoints(maze, dimensions.width, dimensions.height);
+      if (points.start && points.end) {
+        setStartPoint(points.start);
+        setGoalPoint(points.end);
+        console.log(`AUTO_POINTS: Set start (${points.start.x.toFixed(1)}, ${points.start.y.toFixed(1)}) and end (${points.end.x.toFixed(1)}, ${points.end.y.toFixed(1)})`);
+        const distance = Math.sqrt(
+          Math.pow(points.end.x - points.start.x, 2) + Math.pow(points.end.y - points.start.y, 2)
+        );
+        console.log(`AUTO_POINTS: Distance between points: ${distance.toFixed(1)}`);
+      }
+    }
+  }, [maze, dimensions.width, dimensions.height]);
 
   // Plan path using selected algorithm
   const planPath = useCallback(async () => {
@@ -56,16 +139,18 @@ export const usePathfinding = (maze, dimensions) => {
     try {
       const startTime = performance.now();
       
+      const algorithmOptions = {
+        width: dimensions.width,
+        height: dimensions.height,
+        delay,
+        ...(selectedAlgorithm === 'frontier' ? frontierParams : rrtParams)
+      };
+
       const result = await algorithm.execute(
         maze, 
         startPoint, 
         goalPoint,
-        {
-          width: dimensions.width,
-          height: dimensions.height,
-          delay,
-          ...rrtParams
-        },
+        algorithmOptions,
         (nodes, goalReached, extraData) => {
           setRrtTree([...nodes]);
           
@@ -118,7 +203,7 @@ export const usePathfinding = (maze, dimensions) => {
     }
     
     setIsPlanning(false);
-  }, [startPoint, goalPoint, maze, dimensions, selectedAlgorithm, rrtParams, animationSpeed, explorationMode]);
+  }, [startPoint, goalPoint, maze, dimensions, selectedAlgorithm, rrtParams, frontierParams, animationSpeed, explorationMode]);
 
   // Compare all algorithms
   const compareAlgorithms = useCallback(async () => {
@@ -136,16 +221,18 @@ export const usePathfinding = (maze, dimensions) => {
       
       try {
         const startTime = performance.now();
+        const compareOptions = {
+          width: dimensions.width,
+          height: dimensions.height,
+          delay: 1, // Fast comparison
+          ...(algKey === 'frontier' ? frontierParams : rrtParams)
+        };
+
         const result = await algorithm.execute(
           maze, 
           startPoint, 
           goalPoint,
-          {
-            width: dimensions.width,
-            height: dimensions.height,
-            delay: 1, // Fast comparison
-            ...rrtParams
-          },
+          compareOptions,
           () => {} // No progress callback for comparison
         );
         const executionTime = performance.now() - startTime;
@@ -176,7 +263,7 @@ export const usePathfinding = (maze, dimensions) => {
     setAlgorithmResults(results);
     setPlanningStatus('Comparison complete! Check results below.');
     setIsPlanning(false);
-  }, [startPoint, goalPoint, maze, dimensions, rrtParams]);
+  }, [startPoint, goalPoint, maze, dimensions, rrtParams, frontierParams]);
 
   // Clear pathfinding state
   const clearPathfinding = useCallback(() => {
@@ -249,6 +336,8 @@ export const usePathfinding = (maze, dimensions) => {
     frontiers,
     rrtParams,
     setRrtParams,
+    frontierParams,
+    setFrontierParams,
     planPath,
     compareAlgorithms,
     clearPathfinding,

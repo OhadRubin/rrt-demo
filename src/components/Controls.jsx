@@ -22,7 +22,9 @@ const Controls = ({
   onClear,
   planningStatus,
   rrtParams,
-  setRrtParams
+  setRrtParams,
+  frontierParams,
+  setFrontierParams
 }) => {
   return (
     <div className="mb-6 bg-white p-4 rounded-lg shadow">
@@ -208,6 +210,83 @@ const Controls = ({
                   step="0.5"
                   value={rrtParams.rewireRadius}
                   onChange={(e) => setRrtParams(prev => ({ ...prev, rewireRadius: parseFloat(e.target.value) }))}
+                  className="w-full px-2 py-1 border rounded text-sm"
+                />
+              </div>
+            </div>
+          </details>
+        )}
+
+        {/* Frontier Parameters (collapsible) */}
+        {explorationMode && selectedAlgorithm === 'frontier' && (
+          <details className="mt-4">
+            <summary className="cursor-pointer font-medium text-sm">Advanced Frontier Parameters</summary>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
+              <div>
+                <label className="text-xs font-medium">Sensor Range</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={frontierParams.sensorRange}
+                  onChange={(e) => setFrontierParams(prev => ({ ...prev, sensorRange: parseInt(e.target.value) }))}
+                  className="w-full px-2 py-1 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Step Size</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="5"
+                  value={frontierParams.stepSize}
+                  onChange={(e) => setFrontierParams(prev => ({ ...prev, stepSize: parseFloat(e.target.value) }))}
+                  className="w-full px-2 py-1 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Max Iterations</label>
+                <input
+                  type="number"
+                  min="50"
+                  max="2000"
+                  value={frontierParams.maxIterations}
+                  onChange={(e) => setFrontierParams(prev => ({ ...prev, maxIterations: parseInt(e.target.value) }))}
+                  className="w-full px-2 py-1 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Waypoint Tolerance</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max="1"
+                  value={frontierParams.waypointTolerance}
+                  onChange={(e) => setFrontierParams(prev => ({ ...prev, waypointTolerance: parseFloat(e.target.value) }))}
+                  className="w-full px-2 py-1 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Coverage Threshold (%)</label>
+                <input
+                  type="number"
+                  min="50"
+                  max="100"
+                  value={frontierParams.explorationThreshold}
+                  onChange={(e) => setFrontierParams(prev => ({ ...prev, explorationThreshold: parseInt(e.target.value) }))}
+                  className="w-full px-2 py-1 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Pathfinding Timeout</label>
+                <input
+                  type="number"
+                  min="100"
+                  max="5000"
+                  value={frontierParams.pathfindingTimeout}
+                  onChange={(e) => setFrontierParams(prev => ({ ...prev, pathfindingTimeout: parseInt(e.target.value) }))}
                   className="w-full px-2 py-1 border rounded text-sm"
                 />
               </div>
