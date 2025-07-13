@@ -153,7 +153,7 @@ export const createFrontierAlgorithm = () => ({
       waypointTolerance = 0.1, // Distance to waypoint before moving to next
       minFrontierSize = 1,    // Minimum frontier points to consider
       explorationThreshold = 99, // Stop when X% coverage achieved
-      pathfindingTimeout = 1000  // Max BFS search nodes
+      pathfindingTimeout = 100000  // Max BFS search nodes
     } = options;
     
     // Initialize robot knowledge with starting position
@@ -164,7 +164,10 @@ export const createFrontierAlgorithm = () => ({
     let currentTarget = null;
     let currentPath = null;
     let pathIndex = 0;
+    let failedFrontiers = new Map(); // Track failed attempts per frontier
+    let consecutiveFailures = 0; // Count consecutive pathfinding failures
     
+    // while (iterationCount < maxIterations) {
     while (true) {
       iterationCount++;
       
@@ -184,20 +187,23 @@ export const createFrontierAlgorithm = () => ({
         break;
       }
       
-      // Use all frontiers - remove problematic size filtering
-      const validFrontiers = currentFrontiers;
+      // Filter out frontiers that have failed too many times
+      const validFrontiers = currentFrontiers.filter(frontier => {
+        const key = `${frontier.x.toFixed(1)},${frontier.y.toFixed(1)}`;
+        const failures = failedFrontiers.get(key) || 0;
+        return failures < 3; // Skip frontiers that failed 3+ times
+      });
       
-      // Remove early termination based on frontier filtering
-      // Let the algorithm continue as long as frontiers exist
+      if (validFrontiers.length === 0) {
+        console.log(`EXPLORATION_COMPLETE: All remaining frontiers have failed multiple times. Coverage: ${currentCoverage.toFixed(1)}%`);
+        break;
+      }
       
-      // Find nearest accessible frontier (skip inaccessible ones)
+      // Find nearest accessible frontier
       let nearestFrontier = null;
       let minDistance = Infinity;
       
       for (const frontier of validFrontiers) {
-        // Skip if frontier is marked as inaccessible
-        if (frontier.inaccessible) continue;
-        
         const distance = Math.sqrt(
           Math.pow(frontier.x - currentPos.x, 2) + 
           Math.pow(frontier.y - currentPos.y, 2)
@@ -210,8 +216,8 @@ export const createFrontierAlgorithm = () => ({
       
       if (!nearestFrontier) break;
       
-      // Check if we need to plan a new path (new frontier or no current path)
-      if (!currentTarget || !currentPath || (currentTarget.x !== nearestFrontier.x || currentTarget.y !== nearestFrontier.y)) {
+      // Only plan new path if we don't have a current path in progress
+      if (!currentTarget || !currentPath || pathIndex >= currentPath.length) {
         currentTarget = nearestFrontier;
         
         // Find path to the frontier using BFS with known map
@@ -220,11 +226,23 @@ export const createFrontierAlgorithm = () => ({
         
         if (currentPath && currentPath.length > 0) {
           console.log(`PATHFINDING_DEBUG: Found path to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) with ${currentPath.length} steps`);
+          consecutiveFailures = 0; // Reset failure counter on successful pathfinding
         } else {
-          console.log(`PATHFINDING_DEBUG: No path found to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) - trying next frontier`);
+          console.log(`PATHFINDING_DEBUG: No path found to frontier (${currentTarget.x.toFixed(2)}, ${currentTarget.y.toFixed(2)}) - marking as failed`);
           
-          // Instead of marking as inaccessible permanently, just skip this iteration
-          // and try again next time - the map state might change
+          // Track failed attempts for this frontier
+          const frontierKey = `${currentTarget.x.toFixed(1)},${currentTarget.y.toFixed(1)}`;
+          const currentFailures = failedFrontiers.get(frontierKey) || 0;
+          failedFrontiers.set(frontierKey, currentFailures + 1);
+          
+          consecutiveFailures++;
+          
+          // If too many consecutive failures, break to avoid infinite loop
+          if (consecutiveFailures > validFrontiers.length * 2) {
+            console.log(`EXPLORATION_COMPLETE: Too many consecutive pathfinding failures (${consecutiveFailures}). Coverage: ${currentCoverage.toFixed(1)}%`);
+            break;
+          }
+          
           currentTarget = null;
           currentPath = null;
           continue; // Try next frontier
@@ -259,6 +277,7 @@ export const createFrontierAlgorithm = () => ({
             console.log(`MOVEMENT_DEBUG: Reached frontier target! Starting new exploration cycle`);
             currentTarget = null;
             currentPath = null;
+            pathIndex = 0;
           }
         }
       }
