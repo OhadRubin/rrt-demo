@@ -86,6 +86,7 @@ const calculateCoverage = (knownMap, fullMaze) => {
 
 // BFS pathfinding using robot's known map (allows movement through unknown space)
 const findPathBFS = (knownMap, startX, startY, targetX, targetY, width, height, timeout = 1000) => {
+  console.log(`BFS_DEBUG: Pathfinding from (${startX.toFixed(2)}, ${startY.toFixed(2)}) to (${targetX.toFixed(2)}, ${targetY.toFixed(2)})`);
   const startGridX = Math.floor(startX);
   const startGridY = Math.floor(startY);
   const targetGridX = Math.floor(targetX);
@@ -122,7 +123,7 @@ const findPathBFS = (knownMap, startX, startY, targetX, targetY, width, height, 
       const key = `${newX},${newY}`;
       
       if (newX >= 0 && newX < width && newY >= 0 && newY < height && 
-          !visited.has(key) && knownMap[newY * width + newX] !== 1) {
+          !visited.has(key) && knownMap[newY * width + newX] === 0) {
         
         visited.add(key);
         queue.push({
@@ -159,6 +160,24 @@ export const createFrontierAlgorithm = () => ({
     // Initialize robot knowledge with starting position
     let currentPos = { x: robotPos.x, y: robotPos.y };
     let knownMap = createInitialKnownMap(fullMaze, currentPos.x, currentPos.y, sensorRange, width, height);
+    
+    console.log(`INIT_DEBUG: Robot starting at (${currentPos.x.toFixed(2)}, ${currentPos.y.toFixed(2)}) with sensor range ${sensorRange}`);
+    
+    // Debug initial known area
+    let openCells = 0;
+    let wallCells = 0; 
+    let unknownCells = 0;
+    for (let i = 0; i < knownMap.length; i++) {
+      if (knownMap[i] === 0) openCells++;
+      else if (knownMap[i] === 1) wallCells++;
+      else unknownCells++;
+    }
+    console.log(`INIT_DEBUG: Initial known area - Open: ${openCells}, Walls: ${wallCells}, Unknown: ${unknownCells}`);
+    
+    // Check immediate area around robot
+    const robotGridX = Math.floor(currentPos.x);
+    const robotGridY = Math.floor(currentPos.y);
+    console.log(`INIT_DEBUG: Robot grid position (${robotGridX}, ${robotGridY}), cell value: ${knownMap[robotGridY * width + robotGridX]}`);
     let exploredNodes = [{ x: currentPos.x, y: currentPos.y }];
     let iterationCount = 0;
     let currentTarget = null;
@@ -171,53 +190,58 @@ export const createFrontierAlgorithm = () => ({
     while (true) {
       iterationCount++;
       
-      // Detect current frontiers
-      const currentFrontiers = detectFrontiers(knownMap, width, height);
-      
-      // Check exploration completion conditions
-      const currentCoverage = calculateCoverage(knownMap, fullMaze);
-      
-      if (currentFrontiers.length === 0) {
-        console.log(`EXPLORATION_COMPLETE: No more frontiers found. Coverage: ${currentCoverage.toFixed(1)}%`);
-        break;
-      }
-      
-      if (currentCoverage >= explorationThreshold) {
-        console.log(`EXPLORATION_COMPLETE: Coverage threshold reached (${currentCoverage.toFixed(1)}% >= ${explorationThreshold}%)`);
-        break;
-      }
-      
-      // Filter out frontiers that have failed too many times
-      const validFrontiers = currentFrontiers.filter(frontier => {
-        const key = `${frontier.x.toFixed(1)},${frontier.y.toFixed(1)}`;
-        const failures = failedFrontiers.get(key) || 0;
-        return failures < 3; // Skip frontiers that failed 3+ times
-      });
-      
-      if (validFrontiers.length === 0) {
-        console.log(`EXPLORATION_COMPLETE: All remaining frontiers have failed multiple times. Coverage: ${currentCoverage.toFixed(1)}%`);
-        break;
-      }
-      
-      // Find nearest accessible frontier
-      let nearestFrontier = null;
-      let minDistance = Infinity;
-      
-      for (const frontier of validFrontiers) {
-        const distance = Math.sqrt(
-          Math.pow(frontier.x - currentPos.x, 2) + 
-          Math.pow(frontier.y - currentPos.y, 2)
-        );
-        if (distance < minDistance) {
-          minDistance = distance;
-          nearestFrontier = frontier;
-        }
-      }
-      
-      if (!nearestFrontier) break;
-      
       // Only plan new path if we don't have a current path in progress
       if (!currentTarget || !currentPath || pathIndex >= currentPath.length) {
+        // Detect current frontiers
+        const currentFrontiers = detectFrontiers(knownMap, width, height);
+        
+        console.log(`FRONTIER_DEBUG: Found ${currentFrontiers.length} frontiers. Robot at (${currentPos.x.toFixed(2)}, ${currentPos.y.toFixed(2)})`);
+        if (currentFrontiers.length > 0) {
+          console.log(`FRONTIER_DEBUG: First few frontiers:`, currentFrontiers.slice(0, 3).map(f => `(${f.x.toFixed(2)}, ${f.y.toFixed(2)})`));
+        }
+        
+        // Check exploration completion conditions
+        const currentCoverage = calculateCoverage(knownMap, fullMaze);
+        
+        if (currentFrontiers.length === 0) {
+          console.log(`EXPLORATION_COMPLETE: No more frontiers found. Coverage: ${currentCoverage.toFixed(1)}%`);
+          break;
+        }
+        
+        if (currentCoverage >= explorationThreshold) {
+          console.log(`EXPLORATION_COMPLETE: Coverage threshold reached (${currentCoverage.toFixed(1)}% >= ${explorationThreshold}%)`);
+          break;
+        }
+        
+        // Filter out frontiers that have failed too many times
+        const validFrontiers = currentFrontiers.filter(frontier => {
+          const key = `${frontier.x.toFixed(1)},${frontier.y.toFixed(1)}`;
+          const failures = failedFrontiers.get(key) || 0;
+          return failures < 3; // Skip frontiers that failed 3+ times
+        });
+        
+        if (validFrontiers.length === 0) {
+          console.log(`EXPLORATION_COMPLETE: All remaining frontiers have failed multiple times. Coverage: ${currentCoverage.toFixed(1)}%`);
+          break;
+        }
+        
+        // Find nearest accessible frontier
+        let nearestFrontier = null;
+        let minDistance = Infinity;
+        
+        for (const frontier of validFrontiers) {
+          const distance = Math.sqrt(
+            Math.pow(frontier.x - currentPos.x, 2) + 
+            Math.pow(frontier.y - currentPos.y, 2)
+          );
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearestFrontier = frontier;
+          }
+        }
+        
+        if (!nearestFrontier) break;
+        
         currentTarget = nearestFrontier;
         
         // Find path to the frontier using BFS with known map
