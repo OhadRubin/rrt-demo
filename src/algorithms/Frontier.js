@@ -322,11 +322,13 @@ export const createFrontierAlgorithm = () => ({
       // Show spinning progress
       if (onProgress) {
         const spinFrontiers = detectFrontiers(knownMap, width, height);
+        const currentSensorPositions = getSensorPositions(currentPos.x, currentPos.y, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
         onProgress([{ x: currentPos.x, y: currentPos.y }], false, { 
           frontiers: spinFrontiers, 
           knownMap, 
           robotPos: currentPos, 
           robotDirection,
+          sensorPositions: currentSensorPositions,
           isSpinning: true 
         });
         await new Promise(resolve => setTimeout(resolve, delay * 2)); // Slower for visibility
@@ -464,7 +466,8 @@ export const createFrontierAlgorithm = () => ({
       // Update frontiers and call progress callback
       if (onProgress) {
         const updatedFrontiers = detectFrontiers(knownMap, width, height);
-        onProgress(exploredNodes, false, { frontiers: updatedFrontiers, knownMap, robotPos: currentPos, robotDirection });
+        const currentSensorPositions = getSensorPositions(currentPos.x, currentPos.y, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
+        onProgress(exploredNodes, false, { frontiers: updatedFrontiers, knownMap, robotPos: currentPos, robotDirection, sensorPositions: currentSensorPositions });
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }

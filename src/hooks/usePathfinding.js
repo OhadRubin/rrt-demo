@@ -73,6 +73,7 @@ export const usePathfinding = (maze, dimensions) => {
   const [knownMap, setKnownMap] = useState(null);
   const [robotPosition, setRobotPosition] = useState(null);
   const [frontiers, setFrontiers] = useState([]);
+  const [sensorPositions, setSensorPositions] = useState([]);
 
   // RRT parameters
   const [rrtParams, setRrtParams] = useState({
@@ -159,6 +160,7 @@ export const usePathfinding = (maze, dimensions) => {
             if (extraData.frontiers) setFrontiers(extraData.frontiers);
             if (extraData.knownMap) setKnownMap(extraData.knownMap);
             if (extraData.robotPos) setRobotPosition(extraData.robotPos);
+            if (extraData.sensorPositions) setSensorPositions(extraData.sensorPositions);
           }
           
           if (goalReached) {
@@ -275,6 +277,7 @@ export const usePathfinding = (maze, dimensions) => {
     setKnownMap(null);
     setRobotPosition(null);
     setFrontiers([]);
+    setSensorPositions([]);
     setPlanningStatus(explorationMode ? 'Click to set robot start position' : 'Click to set start point');
   }, [explorationMode]);
 
@@ -307,6 +310,7 @@ export const usePathfinding = (maze, dimensions) => {
         setKnownMap(null);
         setRobotPosition(null);
         setFrontiers([]);
+        setSensorPositions([]);
         if (explorationMode) {
           setPlanningStatus('Ready to start exploration');
         } else {
@@ -334,6 +338,7 @@ export const usePathfinding = (maze, dimensions) => {
     knownMap,
     robotPosition,
     frontiers,
+    sensorPositions,
     rrtParams,
     setRrtParams,
     frontierParams,

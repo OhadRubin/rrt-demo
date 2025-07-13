@@ -34,6 +34,7 @@ const MazePathfinder = () => {
     knownMap,
     robotPosition,
     frontiers,
+    sensorPositions,
     rrtParams,
     setRrtParams,
     frontierParams,
@@ -139,6 +140,7 @@ const MazePathfinder = () => {
           selectedAlgorithm={selectedAlgorithm}
           frontiers={frontiers}
           robotPosition={robotPosition}
+          sensorPositions={sensorPositions}
           rrtParams={rrtParams}
           onCanvasClick={handleCanvasClick}
         />

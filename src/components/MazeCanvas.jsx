@@ -15,6 +15,7 @@ const MazeCanvas = ({
   selectedAlgorithm,
   frontiers,
   robotPosition,
+  sensorPositions,
   rrtParams,
   onCanvasClick
 }) => {
@@ -130,6 +131,14 @@ const MazeCanvas = ({
       ctx.stroke();
     }
     
+    // Draw sensor positions (what the robot can see)
+    if (explorationMode && sensorPositions && sensorPositions.length > 0) {
+      ctx.fillStyle = 'rgba(0, 255, 255, 0.6)'; // Cyan color for sensor coverage
+      for (const [x, y] of sensorPositions) {
+        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+      }
+    }
+    
     // Draw path
     if (rrtPath) {
       ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
@@ -164,7 +173,7 @@ const MazeCanvas = ({
       ctx.arc(goalPoint.x * cellSize, goalPoint.y * cellSize, rrtParams.goalRadius * cellSize, 0, 2 * Math.PI);
       ctx.stroke();
     }
-  }, [dimensions, cellSize, rrtTree, rrtPath, startPoint, goalPoint, showTree, rrtParams.goalRadius, selectedAlgorithm, explorationMode, frontiers, robotPosition]);
+  }, [dimensions, cellSize, rrtTree, rrtPath, startPoint, goalPoint, showTree, rrtParams.goalRadius, selectedAlgorithm, explorationMode, frontiers, robotPosition, sensorPositions]);
 
   // Handle canvas click
   const handleCanvasClick = useCallback((event) => {
