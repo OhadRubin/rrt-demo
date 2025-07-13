@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/rrt-demo/static/css/main.b96de676.css",
+    "main.js": "/rrt-demo/static/js/main.974989c1.js",
+    "index.html": "/rrt-demo/index.html",
+    "main.b96de676.css.map": "/rrt-demo/static/css/main.b96de676.css.map",
+    "main.974989c1.js.map": "/rrt-demo/static/js/main.974989c1.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.b96de676.css",
+    "static/js/main.974989c1.js"
+  ]
+}
