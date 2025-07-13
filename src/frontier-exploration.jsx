@@ -11,6 +11,28 @@ const CELL_TYPES = {
   EXPLORED: 6
 };
 
+// Robot directions
+const DIRECTIONS = {
+  NORTH: 0,
+  EAST: 1,
+  SOUTH: 2,
+  WEST: 3
+};
+
+const DIRECTION_VECTORS = {
+  [DIRECTIONS.NORTH]: [-1, 0],
+  [DIRECTIONS.EAST]: [0, 1],
+  [DIRECTIONS.SOUTH]: [1, 0],
+  [DIRECTIONS.WEST]: [0, -1]
+};
+
+const DIRECTION_NAMES = {
+  [DIRECTIONS.NORTH]: '↑',
+  [DIRECTIONS.EAST]: '→',
+  [DIRECTIONS.SOUTH]: '↓',
+  [DIRECTIONS.WEST]: '←'
+};
+
 // Colors for visualization
 const CELL_COLORS = {
   [CELL_TYPES.UNKNOWN]: '#2a2a2a',
@@ -175,6 +197,8 @@ class ExplorationManager {
     this.grid = grid.map(row => [...row]);
     this.robotPos = { ...robotPos };
     this.initialRobotPos = { ...robotPos };
+    this.robotDirection = DIRECTIONS.NORTH; // Initial direction
+    this.initialRobotDirection = DIRECTIONS.NORTH;
     this.aStar = new AStar(this.grid);
     this.frontierDetector = new FrontierDetector(this.grid);
     this.currentPath = [];
@@ -187,13 +211,62 @@ class ExplorationManager {
   }
 
   exploreAround(pos, radius) {
-    for (let i = Math.max(0, pos.x - radius); i <= Math.min(this.grid.length - 1, pos.x + radius); i++) {
-      for (let j = Math.max(0, pos.y - radius); j <= Math.min(this.grid[0].length - 1, pos.y + radius); j++) {
-        if (this.originalGrid[i][j] !== CELL_TYPES.OBSTACLE) {
-          this.grid[i][j] = this.originalGrid[i][j] === CELL_TYPES.OBSTACLE ? CELL_TYPES.OBSTACLE : CELL_TYPES.FREE;
+    // Directional sensor - only explore in a cone in front of the robot
+    const [dx, dy] = DIRECTION_VECTORS[this.robotDirection];
+    
+    // Define sensor cone angle (roughly 90 degrees in front)
+    const sensorPositions = [];
+    
+    // Forward direction positions
+    for (let dist = 1; dist <= radius; dist++) {
+      const frontX = pos.x + dx * dist;
+      const frontY = pos.y + dy * dist;
+      
+      if (frontX >= 0 && frontX < this.grid.length && frontY >= 0 && frontY < this.grid[0].length) {
+        sensorPositions.push([frontX, frontY]);
+      }
+      
+      // Add positions to the sides (creating cone effect)
+      for (let side = 1; side <= Math.min(dist, radius); side++) {
+        if (this.robotDirection === DIRECTIONS.NORTH || this.robotDirection === DIRECTIONS.SOUTH) {
+          // Check left and right when facing north/south
+          const leftY = frontY - side;
+          const rightY = frontY + side;
+          
+          if (leftY >= 0 && leftY < this.grid[0].length) {
+            sensorPositions.push([frontX, leftY]);
+          }
+          if (rightY >= 0 && rightY < this.grid[0].length) {
+            sensorPositions.push([frontX, rightY]);
+          }
         } else {
-          this.grid[i][j] = CELL_TYPES.OBSTACLE;
+          // Check up and down when facing east/west
+          const upX = frontX - side;
+          const downX = frontX + side;
+          
+          if (upX >= 0 && upX < this.grid.length) {
+            sensorPositions.push([upX, frontY]);
+          }
+          if (downX >= 0 && downX < this.grid.length) {
+            sensorPositions.push([downX, frontY]);
+          }
         }
+      }
+    }
+    
+    // Also explore current position and immediate neighbors
+    for (let i = Math.max(0, pos.x - 1); i <= Math.min(this.grid.length - 1, pos.x + 1); i++) {
+      for (let j = Math.max(0, pos.y - 1); j <= Math.min(this.grid[0].length - 1, pos.y + 1); j++) {
+        sensorPositions.push([i, j]);
+      }
+    }
+    
+    // Apply sensor readings
+    for (const [i, j] of sensorPositions) {
+      if (this.originalGrid[i][j] !== CELL_TYPES.OBSTACLE) {
+        this.grid[i][j] = this.originalGrid[i][j] === CELL_TYPES.OBSTACLE ? CELL_TYPES.OBSTACLE : CELL_TYPES.FREE;
+      } else {
+        this.grid[i][j] = CELL_TYPES.OBSTACLE;
       }
     }
   }
@@ -203,6 +276,7 @@ class ExplorationManager {
       cell === CELL_TYPES.OBSTACLE ? CELL_TYPES.OBSTACLE : CELL_TYPES.UNKNOWN
     ));
     this.robotPos = { ...this.initialRobotPos };
+    this.robotDirection = this.initialRobotDirection;
     this.aStar = new AStar(this.grid);
     this.frontierDetector = new FrontierDetector(this.grid);
     this.currentPath = [];
@@ -238,12 +312,27 @@ class ExplorationManager {
     return visGrid;
   }
 
+  getRobotDirectionSymbol() {
+    return DIRECTION_NAMES[this.robotDirection];
+  }
+
   executeStep() {
     if (this.isComplete) return false;
 
     // If we have a current path, move along it
     if (this.currentPath.length > 0 && this.pathIndex < this.currentPath.length) {
-      this.robotPos = { ...this.currentPath[this.pathIndex] };
+      const nextPos = this.currentPath[this.pathIndex];
+      
+      // Update robot direction based on movement
+      const dx = nextPos.x - this.robotPos.x;
+      const dy = nextPos.y - this.robotPos.y;
+      
+      if (dx === -1 && dy === 0) this.robotDirection = DIRECTIONS.NORTH;
+      else if (dx === 1 && dy === 0) this.robotDirection = DIRECTIONS.SOUTH;
+      else if (dx === 0 && dy === -1) this.robotDirection = DIRECTIONS.WEST;
+      else if (dx === 0 && dy === 1) this.robotDirection = DIRECTIONS.EAST;
+      
+      this.robotPos = { ...nextPos };
       this.pathIndex++;
       
       // If we reached the end of the path, explore around the new position
@@ -420,6 +509,7 @@ const FrontierExploration = () => {
         {explorationManager && (
           <div className="text-sm text-gray-600 mb-4">
             Steps: {explorationManager.step} | 
+            Direction: {explorationManager.getRobotDirectionSymbol()} | 
             Status: {explorationManager.isComplete ? 'Exploration Complete!' : isRunning ? 'Running' : 'Paused'}
           </div>
         )}
@@ -437,10 +527,12 @@ const FrontierExploration = () => {
             row.map((cell, j) => (
               <div
                 key={`${i}-${j}`}
-                className="w-6 h-6 border border-gray-300"
+                className="w-6 h-6 border border-gray-300 flex items-center justify-center text-xs font-bold"
                 style={{ backgroundColor: CELL_COLORS[cell] }}
                 title={`(${i},${j})`}
-              />
+              >
+                {cell === CELL_TYPES.ROBOT && explorationManager ? explorationManager.getRobotDirectionSymbol() : ''}
+              </div>
             ))
           )}
         </div>
