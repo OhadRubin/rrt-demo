@@ -86,9 +86,9 @@ export const usePathfinding = (maze, dimensions) => {
 
   // Frontier parameters
   const [frontierParams, setFrontierParams] = useState({
-    sensorRange: 3,
+    sensorRange: 15,
     stepSize: 1,
-    maxIterations: 500,
+    maxIterations: 5000,
     waypointTolerance: 0.1,
     minFrontierSize: 1,
     explorationThreshold: 95,
