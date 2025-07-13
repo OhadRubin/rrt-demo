@@ -200,7 +200,7 @@ const updateKnownMap = (knownMap, fullMaze, robotX, robotY, robotDirection, sens
   const robotGridY = Math.floor(robotY);
   
   // Reveal new area using directional sensor with line-of-sight
-  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height, true);
+  const sensorPositions = getSensorPositions(robotX, robotY, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
   
   for (const [x, y] of sensorPositions) {
     if (hasLineOfSight(fullMaze, robotGridX, robotGridY, x, y, width, height)) {
@@ -322,13 +322,17 @@ export const createFrontierAlgorithm = () => ({
       // Show spinning progress
       if (onProgress) {
         const spinFrontiers = detectFrontiers(knownMap, width, height);
-        const currentSensorPositions = getSensorPositions(currentPos.x, currentPos.y, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
+        const allSensorPositions = getSensorPositions(currentPos.x, currentPos.y, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
+        // Filter sensor positions by line-of-sight
+        const visibleSensorPositions = allSensorPositions.filter(([x, y]) => 
+          hasLineOfSight(fullMaze, Math.floor(currentPos.x), Math.floor(currentPos.y), x, y, width, height)
+        );
         onProgress([{ x: currentPos.x, y: currentPos.y }], false, { 
           frontiers: spinFrontiers, 
           knownMap, 
           robotPos: currentPos, 
           robotDirection,
-          sensorPositions: currentSensorPositions,
+          sensorPositions: visibleSensorPositions,
           isSpinning: true 
         });
         await new Promise(resolve => setTimeout(resolve, delay * 2)); // Slower for visibility
@@ -466,8 +470,12 @@ export const createFrontierAlgorithm = () => ({
       // Update frontiers and call progress callback
       if (onProgress) {
         const updatedFrontiers = detectFrontiers(knownMap, width, height);
-        const currentSensorPositions = getSensorPositions(currentPos.x, currentPos.y, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
-        onProgress(exploredNodes, false, { frontiers: updatedFrontiers, knownMap, robotPos: currentPos, robotDirection, sensorPositions: currentSensorPositions });
+        const allSensorPositions = getSensorPositions(currentPos.x, currentPos.y, robotDirection, sensorRange, width, height, GENEROUS_SENSOR);
+        // Filter sensor positions by line-of-sight
+        const visibleSensorPositions = allSensorPositions.filter(([x, y]) => 
+          hasLineOfSight(fullMaze, Math.floor(currentPos.x), Math.floor(currentPos.y), x, y, width, height)
+        );
+        onProgress(exploredNodes, false, { frontiers: updatedFrontiers, knownMap, robotPos: currentPos, robotDirection, sensorPositions: visibleSensorPositions });
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
