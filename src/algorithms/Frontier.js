@@ -123,9 +123,9 @@ export const createFrontierAlgorithm = () => ({
       minFrontierSize = 1,    // Minimum frontier points to consider
       explorationThreshold = 99, // Stop when X% coverage achieved
       pathfindingTimeout = 100000,  // Max BFS search nodes
-      useWFD = false,         // Use Wavefront Frontier Detection (research paper version)
+      useWFD = true,         // Use Wavefront Frontier Detection (research paper version)
       pathfindingAlgorithm = 'bfs', // 'bfs', 'astar', 'dijkstra'
-      frontierStrategy = 'nearest'  // 'nearest', 'centroid', 'median'
+      frontierStrategy = 'median'  // 'nearest', 'centroid', 'median'
     } = options;
     
     // Initialize modular components
